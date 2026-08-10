@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{title}}</title>
+</head>
+<body style="margin:0; padding:0; background-color:#F6F5F2; font-family:Inter, Helvetica, Arial, sans-serif; color:#151B26; -webkit-font-smoothing:antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F6F5F2; padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px; background-color:#FFFFFF; border-radius:10px; overflow:hidden; border:1px solid #DCD9D1;">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#9C6B2E; padding:22px 32px;">
+              <span style="font-size:16px; font-weight:700; color:#FFFFFF; letter-spacing:0.5px;">{{appName}}</span>
+              <span style="display:block; font-size:11px; color:#E8D9BE; margin-top:3px;">{{appTagline}}</span>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:28px 32px;">
+              <p style="margin:0 0 6px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:#9C6B2E;">{{title}}</p>
+              <h1 style="margin:0 0 16px; font-size:18px; font-weight:700; color:#151B26;">{{heading}}</h1>
+              <p style="margin:0 0 20px; font-size:13px; line-height:1.6; color:#4B5563;">{{message}}</p>
+
+              {{#if details}}
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; margin-bottom:20px;">
+                {{#each details}}
+                <tr>
+                  <td style="padding:8px 12px; font-size:11px; font-weight:600; color:#4B5563; background-color:#ECEAE4; border:1px solid #DCD9D1; width:42%;">{{label}}</td>
+                  <td style="padding:8px 12px; font-size:12px; font-weight:600; color:#151B26; border:1px solid #DCD9D1;">{{value}}</td>
+                </tr>
+                {{/each}}
+              </table>
+              {{/if}}
+
+              {{#if ctaUrl}}
+              <table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="border-radius:6px; background-color:#151B26;">
+                    <a href="{{ctaUrl}}" style="display:inline-block; padding:10px 18px; font-size:13px; font-weight:600; color:#FFFFFF; text-decoration:none;">{{ctaText}}</a>
+                  </td>
+                </tr>
+              </table>
+              {{/if}}
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:18px 32px; border-top:1px solid #DCD9D1; background-color:#F6F5F2;">
+              <p style="margin:0; font-size:11px; line-height:1.5; color:#4B5563;">{{footerText}}</p>
+              <p style="margin:8px 0 0; font-size:10px; color:#4B5563;">ECMMS &mdash; Employee Contract Management &amp; Monitoring System</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

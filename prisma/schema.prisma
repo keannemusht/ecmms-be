@@ -1,0 +1,197 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  MANAGEMENT
+  USER
+}
+
+enum EmploymentType {
+  PKWT
+  PKWTT
+  MAGANG
+}
+
+enum ContractStatus {
+  AKTIF
+  AKAN_BERAKHIR
+  EXPIRED
+  DIPERPANJANG
+  DIANGKAT_TETAP
+}
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+  IN_APP
+}
+
+enum SubmissionType {
+  EXTENSION
+  DATA_UPDATE
+  RESIGNATION
+  OTHER
+}
+
+enum SubmissionStatus {
+  PENDING
+  DIPROSES
+  DISETUJUI
+  DITOLAK
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  password     String
+  name         String
+  role         Role      @default(USER)
+  isActive     Boolean   @default(true)
+  employeeId   String?   @unique
+  employee     Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  contractsCreated     Contract[]          @relation("ContractCreatedBy")
+  historyCreated       ContractHistory[]   @relation("HistoryChangedBy")
+  submissionsProcessed SubmissionForm[]    @relation("SubmissionProcessedBy")
+  notifications        InAppNotification[]
+  auditLogs            AuditLog[]
+}
+
+model Employee {
+  id             String         @id @default(uuid())
+  nik            String         @unique
+  name           String
+  email          String         @unique
+  phone          String?
+  department     String
+  position       String
+  employmentType EmploymentType @default(PKWT)
+  joinDate       DateTime
+  user           User?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  contracts   Contract[]
+  submissions SubmissionForm[]
+}
+
+model Contract {
+  id             String         @id @default(uuid())
+  employeeId     String
+  employee       Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  contractNumber String         @unique
+  contractType   EmploymentType @default(PKWT)
+  startDate      DateTime
+  endDate        DateTime
+  status         ContractStatus @default(AKTIF)
+  documentUrl    String?
+  notes          String?
+  createdById    String?
+  createdBy      User?          @relation("ContractCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  history       ContractHistory[]
+  notifications NotificationLog[]
+  inAppNotifications InAppNotification[]
+}
+
+model ContractHistory {
+  id           String   @id @default(uuid())
+  contractId   String
+  contract     Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  changeType   String
+  previousData String?
+  newData      String?
+  changedById  String?
+  changedBy    User?    @relation("HistoryChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+}
+
+model NotificationRule {
+  id          String                 @id @default(uuid())
+  name        String
+  daysBefore  Int
+  channels    NotificationChannel[]
+  targetRoles Role[]
+  template    String
+  isActive    Boolean                @default(true)
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+}
+
+model NotificationLog {
+  id         String              @id @default(uuid())
+  contractId String?
+  contract   Contract?           @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  recipient  String
+  channel    NotificationChannel
+  status     String              @default("SENT")
+  message    String
+  error      String?
+  sentAt     DateTime            @default(now())
+}
+
+model InAppNotification {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  message         String
+  link            String?
+  contractId      String?
+  contract        Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  whatsappPhone   String?
+  whatsappMessage String?
+  isRead          Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+}
+
+model SubmissionForm {
+  id             String           @id @default(uuid())
+  employeeId     String
+  employee       Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  submissionType SubmissionType
+  status         SubmissionStatus @default(PENDING)
+  reason         String
+  remarks        String?
+  processedById  String?
+  processedBy    User?            @relation("SubmissionProcessedBy", fields: [processedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  details   String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+}
+
+model Department {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Position {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
