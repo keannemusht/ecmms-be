@@ -7,12 +7,53 @@ const express_1 = require("express");
 const prisma_1 = __importDefault(require("../prisma"));
 const auth_1 = require("../middleware/auth");
 const auditLogger_1 = require("../utils/auditLogger");
+const whatsappNotification_1 = require("../services/whatsappNotification");
 const router = (0, express_1.Router)();
 const CATEGORY_KEYWORDS = {
     expiration: ['kontrak', 'contract', 'jatuh', 'berakhir', 'expire', 'expiring'],
     submission: ['pengajuan', 'submission', 'form', 'perpanjangan', 'renewal'],
     escalation: ['eskalasi', 'escalation', 'overdue', 'urgent'],
 };
+// POST /api/notifications/in-app/:id/send-whatsapp — build wa.me link to the employee's number
+router.post('/in-app/:id/send-whatsapp', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MANAGEMENT']), async (req, res) => {
+    try {
+        const id = String(req.params.id);
+        const userId = req.user?.id;
+        const notification = await prisma_1.default.inAppNotification.findFirst({
+            where: { id, userId },
+        });
+        if (!notification) {
+            return res.status(404).json({ error: 'Notifikasi tidak ditemukan.' });
+        }
+        if (!notification.whatsappPhone || !notification.whatsappMessage) {
+            return res.status(400).json({ error: 'Notifikasi ini tidak memiliki aksi kirim WhatsApp.' });
+        }
+        const link = (0, whatsappNotification_1.buildWhatsAppLink)(notification.whatsappPhone, notification.whatsappMessage);
+        if (!link) {
+            return res.status(400).json({ error: 'Nomor WhatsApp karyawan tidak valid.' });
+        }
+        if (notification.contractId) {
+            await prisma_1.default.notificationLog.create({
+                data: {
+                    contractId: notification.contractId,
+                    recipient: notification.whatsappPhone,
+                    channel: 'WHATSAPP',
+                    status: 'SENT',
+                    message: link,
+                },
+            });
+        }
+        await prisma_1.default.inAppNotification.updateMany({
+            where: { id },
+            data: { isRead: true },
+        });
+        await (0, auditLogger_1.logAudit)(req.user?.id, 'SEND_WHATSAPP', 'NOTIFICATION', `WhatsApp link dibuka untuk ${notification.whatsappPhone}`, req.ip || '');
+        return res.json({ link, phone: notification.whatsappPhone });
+    }
+    catch (error) {
+        return res.status(500).json({ error: 'Gagal membuat link WhatsApp.' });
+    }
+});
 // GET /api/notifications/in-app
 router.get('/in-app', auth_1.authenticateJWT, async (req, res) => {
     try {

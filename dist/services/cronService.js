@@ -8,6 +8,7 @@ exports.initCronJobs = initCronJobs;
 const node_cron_1 = __importDefault(require("node-cron"));
 const prisma_1 = __importDefault(require("../prisma"));
 const notificationDelivery_1 = require("./notificationDelivery");
+const whatsappNotification_1 = require("./whatsappNotification");
 function formatDate(d) {
     return d.toISOString().split('T')[0];
 }
@@ -35,7 +36,8 @@ async function resolveRecipients(targetRole, employee) {
     if (targetRole === 'USER') {
         const userIds = employee?.user ? [employee.user.id] : [];
         const email = employee?.user?.email || employee?.email || '';
-        return { userIds, emails: email ? [email] : [] };
+        const phones = employee?.phone ? [employee.phone] : [];
+        return { userIds, emails: email ? [email] : [], phones };
     }
     const users = await prisma_1.default.user.findMany({
         where: { role: { in: ['ADMIN', 'MANAGEMENT'] } },
@@ -44,12 +46,31 @@ async function resolveRecipients(targetRole, employee) {
     return {
         userIds: users.map((u) => u.id),
         emails: [...new Set(users.map((u) => u.email).filter((e) => Boolean(e)))],
+        phones: [...new Set(users.map((u) => u.employee?.phone).filter((p) => Boolean(p)))],
     };
 }
 async function sendInApp(userIds, title, message, link = '/contracts') {
     for (const userId of userIds) {
         await prisma_1.default.inAppNotification.create({
             data: { userId, title, message, link },
+        });
+    }
+}
+async function sendWhatsAppActionNotifications(params) {
+    const admins = await prisma_1.default.user.findMany({
+        where: { role: { in: ['ADMIN', 'MANAGEMENT'] }, isActive: true },
+        select: { id: true },
+    });
+    for (const admin of admins) {
+        await prisma_1.default.inAppNotification.create({
+            data: {
+                userId: admin.id,
+                title: `WhatsApp · ${params.title}`,
+                message: params.message,
+                contractId: params.contractId,
+                whatsappPhone: params.phone,
+                whatsappMessage: params.waMessage,
+            },
         });
     }
 }
@@ -96,6 +117,24 @@ async function dispatchRule(contract, rule, message) {
                         status: result.ok ? 'SENT' : 'FAILED',
                         message,
                         error: result.error,
+                    });
+                }
+            }
+            else if (channel === 'WHATSAPP') {
+                for (const phone of recipients.phones) {
+                    const waMessage = (0, whatsappNotification_1.buildWhatsAppMessage)({
+                        title,
+                        heading: rule.name,
+                        message,
+                        contract,
+                        footerText: 'Pesan ini dikirim otomatis oleh sistem monitoring kontrak PKWT.',
+                    });
+                    await sendWhatsAppActionNotifications({
+                        contractId: contract.id,
+                        title,
+                        message,
+                        phone,
+                        waMessage,
                     });
                 }
             }

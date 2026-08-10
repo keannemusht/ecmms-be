@@ -8,6 +8,7 @@ const prisma_1 = __importDefault(require("../prisma"));
 const auth_1 = require("../middleware/auth");
 const auditLogger_1 = require("../utils/auditLogger");
 const upload_1 = require("../utils/upload");
+const whatsappNotification_1 = require("../services/whatsappNotification");
 const router = (0, express_1.Router)();
 // GET /api/contracts
 router.get('/', auth_1.authenticateJWT, async (req, res) => {
@@ -50,6 +51,48 @@ router.get('/', auth_1.authenticateJWT, async (req, res) => {
     catch (error) {
         console.error('Error fetching contracts:', error);
         return res.status(500).json({ error: 'Gagal mengambil data kontrak.' });
+    }
+});
+// POST /api/contracts/:id/send-whatsapp — build wa.me link for the contract's employee
+router.post('/:id/send-whatsapp', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MANAGEMENT']), async (req, res) => {
+    try {
+        const id = String(req.params.id);
+        const contract = await prisma_1.default.contract.findUnique({
+            where: { id },
+            include: { employee: true },
+        });
+        if (!contract) {
+            return res.status(404).json({ error: 'Kontrak tidak ditemukan.' });
+        }
+        const phone = contract.employee?.phone;
+        if (!phone) {
+            return res.status(400).json({ error: 'Karyawan ini belum memiliki nomor telepon.' });
+        }
+        const waMessage = (0, whatsappNotification_1.buildWhatsAppMessage)({
+            title: 'Informasi Kontrak',
+            heading: `Kontrak ${contract.contractNumber}`,
+            message: `Detail kontrak ${contract.employee.name}: berakhir pada ${new Date(contract.endDate).toISOString().split('T')[0]}. Mohon tinjau dan tindak lanjuti segera.`,
+            contract,
+            footerText: 'Pesan ini dikirim melalui sistem monitoring kontrak PKWT.',
+        });
+        const link = (0, whatsappNotification_1.buildWhatsAppLink)(phone, waMessage);
+        if (!link) {
+            return res.status(400).json({ error: 'Nomor WhatsApp karyawan tidak valid.' });
+        }
+        await prisma_1.default.notificationLog.create({
+            data: {
+                contractId: id,
+                recipient: phone,
+                channel: 'WHATSAPP',
+                status: 'SENT',
+                message: link,
+            },
+        });
+        await (0, auditLogger_1.logAudit)(req.user?.id, 'SEND_WHATSAPP', 'CONTRACT', `WhatsApp link dibuka untuk ${contract.employee.name} (${phone})`, req.ip || '');
+        return res.json({ link, phone });
+    }
+    catch (error) {
+        return res.status(500).json({ error: 'Gagal membuat link WhatsApp.' });
     }
 });
 // GET /api/contracts/:id

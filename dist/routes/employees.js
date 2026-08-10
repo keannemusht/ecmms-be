@@ -7,6 +7,7 @@ const express_1 = require("express");
 const prisma_1 = __importDefault(require("../prisma"));
 const auth_1 = require("../middleware/auth");
 const auditLogger_1 = require("../utils/auditLogger");
+const whatsappNotification_1 = require("../services/whatsappNotification");
 const router = (0, express_1.Router)();
 // GET /api/employees
 router.get('/', auth_1.authenticateJWT, async (req, res) => {
@@ -97,6 +98,50 @@ router.get('/:id', auth_1.authenticateJWT, async (req, res) => {
     }
     catch (error) {
         return res.status(500).json({ error: 'Gagal mengambil detail karyawan.' });
+    }
+});
+// POST /api/employees/:id/send-whatsapp — build wa.me link for the employee's phone
+router.post('/:id/send-whatsapp', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MANAGEMENT']), async (req, res) => {
+    try {
+        const id = String(req.params.id);
+        const employee = await prisma_1.default.employee.findUnique({ where: { id } });
+        if (!employee) {
+            return res.status(404).json({ error: 'Karyawan tidak ditemukan.' });
+        }
+        const phone = employee.phone;
+        if (!phone) {
+            return res.status(400).json({ error: 'Karyawan ini belum memiliki nomor telepon.' });
+        }
+        const message = [
+            `*Informasi Karyawan*`,
+            `*${employee.name}*`,
+            '',
+            `NIK: ${employee.nik}`,
+            `Departemen: ${employee.department}`,
+            `Jabatan: ${employee.position}`,
+            `Email: ${employee.email}`,
+            `Tipe Kontrak: ${employee.employmentType}`,
+            `Tanggal Bergabung: ${new Date(employee.joinDate).toISOString().split('T')[0]}`,
+            '',
+            'Pesan ini dikirim melalui sistem monitoring kontrak PKWT.',
+        ].join('\n');
+        const link = (0, whatsappNotification_1.buildWhatsAppLink)(phone, message);
+        if (!link) {
+            return res.status(400).json({ error: 'Nomor WhatsApp karyawan tidak valid.' });
+        }
+        await prisma_1.default.notificationLog.create({
+            data: {
+                recipient: phone,
+                channel: 'WHATSAPP',
+                status: 'SENT',
+                message: link,
+            },
+        });
+        await (0, auditLogger_1.logAudit)(req.user?.id, 'SEND_WHATSAPP', 'EMPLOYEE', `WhatsApp link dibuka untuk ${employee.name} (${phone})`, req.ip || '');
+        return res.json({ link, phone });
+    }
+    catch (error) {
+        return res.status(500).json({ error: 'Gagal membuat link WhatsApp.' });
     }
 });
 // POST /api/employees
