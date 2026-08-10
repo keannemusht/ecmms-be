@@ -7,9 +7,16 @@ exports.uploadDirPath = exports.uploadContractDocument = void 0;
 const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
-const uploadDir = path_1.default.join(__dirname, '../../uploads');
-if (!fs_1.default.existsSync(uploadDir)) {
-    fs_1.default.mkdirSync(uploadDir, { recursive: true });
+const os_1 = __importDefault(require("os"));
+const isVercel = process.env.VERCEL === '1';
+const uploadDir = isVercel ? path_1.default.join(os_1.default.tmpdir(), 'uploads') : path_1.default.join(__dirname, '../../uploads');
+try {
+    if (!fs_1.default.existsSync(uploadDir)) {
+        fs_1.default.mkdirSync(uploadDir, { recursive: true });
+    }
+}
+catch (error) {
+    console.warn('[Upload] Could not create upload directory, continuing without it:', error);
 }
 const allowedExtensions = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'];
 const storage = multer_1.default.diskStorage({
