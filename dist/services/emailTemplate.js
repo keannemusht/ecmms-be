@@ -12,6 +12,7 @@ function resolveTemplateDir() {
     const candidates = [
         path_1.default.join(__dirname, 'emailTemplates'),
         path_1.default.join(process.cwd(), 'src/services/emailTemplates'),
+        path_1.default.join(process.cwd(), 'dist/services/emailTemplates'),
     ];
     return candidates.find((dir) => fs_1.default.existsSync(dir)) || candidates[0];
 }

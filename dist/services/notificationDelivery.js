@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getEmailLogoUrl = getEmailLogoUrl;
 exports.sendEmail = sendEmail;
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const emailTemplate_1 = require("./emailTemplate");
@@ -11,6 +12,16 @@ const SMTP_PORT = parseInt(process.env.SMTP_PORT || (SMTP_HOST === 'smtp.gmail.c
 const SMTP_USER = process.env.SMTP_USER || process.env.MAIL_USER || '';
 const SMTP_PASS = process.env.SMTP_PASS || process.env.MAIL_PASS || '';
 const SMTP_FROM = process.env.SMTP_FROM || (SMTP_USER ? `ECMMS <${SMTP_USER}>` : 'no-reply@ecmms.local');
+const LOGO_FILENAME = 'bbp_logo_202409_LeftAligment.png';
+function getEmailLogoUrl() {
+    const explicit = process.env.EMAIL_LOGO_URL;
+    if (explicit)
+        return explicit;
+    const frontend = process.env.FRONTEND_URL;
+    if (frontend)
+        return `${frontend.replace(/\/+$/, '')}/img/${LOGO_FILENAME}`;
+    return '';
+}
 let transporter = null;
 function getTransporter() {
     // Prefer explicit SMTP config; fall back to Gmail app password (MAIL_USER/MAIL_PASS).

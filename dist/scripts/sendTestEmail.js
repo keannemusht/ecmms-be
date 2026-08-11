@@ -10,16 +10,30 @@ async function main() {
         template: 'notification',
         context: {
             appName: 'ECMMS',
-            appTagline: 'Sistem Management & Monitoring PKWT',
-            title: 'Test Notification',
-            heading: 'Email notification berhasil terkirim',
-            message: 'Ini adalah email uji coba dari sistem ECMMS. Jika Anda menerima email ini, berarti konfigurasi nodemailer dan template sudah berjalan dengan benar.',
-            details: [
-                { label: 'Karyawan', value: 'Budi Santoso (Contoh)' },
-                { label: 'No. Kontrak', value: 'PKWT/2026/TECH/001' },
-                { label: 'Tanggal Berakhir', value: '2026-09-07' },
-            ],
-            footerText: 'Pesan ini dikirim otomatis oleh sistem monitoring kontrak PKWT.',
+            appTagline: 'Employee Contract Management & Monitoring System',
+            logoUrl: (0, notificationDelivery_1.getEmailLogoUrl)(),
+            en: {
+                title: 'Test Notification',
+                heading: 'Email notification sent successfully',
+                message: 'This is a test email from the ECMMS system. If you received this email, the nodemailer configuration and template are working correctly.',
+                details: [
+                    { label: 'Employee', value: 'Budi Santoso (Sample)' },
+                    { label: 'Contract No.', value: 'PKWT/2026/TECH/001' },
+                    { label: 'End Date', value: '2026-09-07' },
+                ],
+                footerText: 'This message was sent automatically by the PKWT contract monitoring system.',
+            },
+            id: {
+                title: 'Notifikasi Uji Coba',
+                heading: 'Notifikasi email berhasil terkirim',
+                message: 'Ini adalah email uji coba dari sistem ECMMS. Jika Anda menerima email ini, berarti konfigurasi nodemailer dan template sudah berjalan dengan benar.',
+                details: [
+                    { label: 'Karyawan', value: 'Budi Santoso (Contoh)' },
+                    { label: 'No. Kontrak', value: 'PKWT/2026/TECH/001' },
+                    { label: 'Tanggal Berakhir', value: '2026-09-07' },
+                ],
+                footerText: 'Pesan ini dikirim otomatis oleh sistem monitoring kontrak PKWT.',
+            },
         },
     });
     if (result.ok) {

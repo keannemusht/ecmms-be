@@ -7,6 +7,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "prisma generate && tsc",
+    "postbuild": "node scripts/copy-templates.cjs",
     "start": "node dist/index.js",
     "studio": "prisma studio --port 5555",
     "test:email": "ts-node src/scripts/sendTestEmail.ts",

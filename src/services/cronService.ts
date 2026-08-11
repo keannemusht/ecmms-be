@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import prisma from '../prisma';
-import { sendEmail } from './notificationDelivery';
+import { sendEmail, getEmailLogoUrl } from './notificationDelivery';
 import { buildWhatsAppMessage } from './whatsappNotification';
 import { NotificationChannel, Role } from '@prisma/client';
 
@@ -14,19 +14,43 @@ function buildEmailContext(params: {
   message: string;
   footerText: string;
   contract: any;
+  titleEn?: string;
+  headingEn?: string;
+  footerTextEn?: string;
 }) {
+  const employeeName = params.contract.employee.name;
+  const contractNumber = params.contract.contractNumber;
+  const endDate = formatDate(new Date(params.contract.endDate));
+
+  const enMessage = `Contract ${employeeName} (${contractNumber}) will expire on ${endDate}. Please review and follow up as needed.`;
+
   return {
     appName: 'ECMMS',
-    appTagline: 'Sistem Management & Monitoring PKWT',
-    title: params.title,
-    heading: params.heading,
-    message: params.message,
-    details: [
-      { label: 'Karyawan', value: params.contract.employee.name },
-      { label: 'No. Kontrak', value: params.contract.contractNumber },
-      { label: 'Tanggal Berakhir', value: formatDate(new Date(params.contract.endDate)) },
-    ],
-    footerText: params.footerText,
+    appTagline: 'Employee Contract Management & Monitoring System',
+    logoUrl: getEmailLogoUrl(),
+    en: {
+      title: params.titleEn || 'Contract Alert',
+      heading: params.headingEn || params.heading,
+      message: enMessage,
+      details: [
+        { label: 'Employee', value: employeeName },
+        { label: 'Contract No.', value: contractNumber },
+        { label: 'End Date', value: endDate },
+      ],
+      footerText:
+        params.footerTextEn || 'This message was sent automatically by the PKWT contract monitoring system.',
+    },
+    id: {
+      title: params.title,
+      heading: params.heading,
+      message: params.message,
+      details: [
+        { label: 'Karyawan', value: employeeName },
+        { label: 'No. Kontrak', value: contractNumber },
+        { label: 'Tanggal Berakhir', value: endDate },
+      ],
+      footerText: params.footerText,
+    },
   };
 }
 
@@ -221,6 +245,9 @@ async function runEscalation(contract: any) {
         message,
         contract,
         footerText: 'Segera lakukan tindak lanjut terhadap kontrak yang sudah jatuh tempo.',
+        titleEn: 'Contract Escalation',
+        headingEn: 'Contract has passed its end date',
+        footerTextEn: 'Please follow up on contracts that have passed their end date.',
       }),
     });
     await logNotification({

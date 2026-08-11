@@ -18,6 +18,16 @@ export interface EmailOptions {
   context?: Record<string, unknown>;
 }
 
+const LOGO_FILENAME = 'bbp_logo_202409_LeftAligment.png';
+
+export function getEmailLogoUrl(): string {
+  const explicit = process.env.EMAIL_LOGO_URL;
+  if (explicit) return explicit;
+  const frontend = process.env.FRONTEND_URL;
+  if (frontend) return `${frontend.replace(/\/+$/, '')}/img/${LOGO_FILENAME}`;
+  return '';
+}
+
 let transporter: nodemailer.Transporter | null = null;
 
 function getTransporter(): nodemailer.Transporter | null {

@@ -121,6 +121,22 @@ router.put('/in-app/:id/read', authenticateJWT, async (req: AuthRequest, res: Re
   }
 });
 
+// DELETE /api/notifications/in-app — clear all in-app notifications for the current user
+router.delete('/in-app', authenticateJWT, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const result = await prisma.inAppNotification.deleteMany({
+      where: { userId },
+    });
+
+    await logAudit(req.user?.id, 'CLEAR_NOTIFICATIONS', 'NOTIFICATION', `Cleared ${result.count} in-app notifications`, req.ip || '');
+
+    return res.json({ message: 'Semua notifikasi berhasil dihapus.', deleted: result.count });
+  } catch (error) {
+    return res.status(500).json({ error: 'Gagal menghapus notifikasi.' });
+  }
+});
+
 // PUT /api/notifications/in-app/read-all
 router.put('/in-app/read-all', authenticateJWT, async (req: AuthRequest, res: Response) => {
   try {

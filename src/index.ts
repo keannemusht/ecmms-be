@@ -11,11 +11,12 @@ import userRoutes from './routes/users';
 import departmentRoutes from './routes/departments';
 import positionRoutes from './routes/positions';
 import auditLogRoutes from './routes/auditLogs';
-import { initCronJobs } from './services/cronService';
+import { initCronJobs, runContractExpirationCheck } from './services/cronService';
 import { uploadDirPath } from './utils/upload';
 
 const app = express();
 const PORT = process.env.PORT || 8000;
+const isVercel = process.env.VERCEL === '1';
 
 app.use(
   cors({
@@ -47,11 +48,39 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', system: 'ECMMS PKWT Monitoring API', timestamp: new Date().toISOString() });
 });
 
+// Cron endpoint for Vercel Cron Jobs (see vercel.json). Runs the daily contract
+// expiration / notification check. Protected so it can't be triggered manually.
+app.get('/api/cron/contract-expiration', async (req, res) => {
+  const cronSecret = process.env.CRON_SECRET;
+  const isVercelCron =
+    req.get('x-vercel-cron') === '1' ||
+    req.get('x-vercel-cron-schedule') !== undefined ||
+    /vercel-cron/i.test(req.get('user-agent') || '');
+  const hasValidSecret = !!cronSecret && req.get('authorization') === `Bearer ${cronSecret}`;
+  if (!isVercelCron && !hasValidSecret) {
+    return res.status(401).json({ error: 'Unauthorized.' });
+  }
+
+  try {
+    await runContractExpirationCheck();
+    return res.json({ ok: true });
+  } catch (error: any) {
+    console.error('[Cron] Failed to run contract expiration check via cron endpoint:', error);
+    return res.status(500).json({ ok: false, error: error?.message || String(error) });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`=======================================================`);
   console.log(`🚀 ECMMS Backend API running on http://localhost:${PORT}`);
   console.log(`=======================================================`);
 
-  // Start background monitoring cron
-  initCronJobs();
+  // node-cron + startup check only run outside Vercel serverless (where
+  // long-running processes are not guaranteed). On Vercel, scheduling is
+  // handled by Vercel Cron Jobs -> /api/cron/contract-expiration.
+  if (!isVercel) {
+    initCronJobs();
+  }
 });
+
+export default app;
