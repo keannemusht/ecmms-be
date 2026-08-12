@@ -171,6 +171,7 @@ router.post('/', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (r
         employeeId,
         contractNumber,
         contractType,
+        sequence: (await prisma.contract.count({ where: { employeeId } })) + 1,
         startDate: start,
         endDate: end,
         status: initialStatus,
@@ -261,6 +262,7 @@ router.post('/:id/extend', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT'])
         employeeId: oldContract.employeeId,
         contractNumber: newContractNumber,
         contractType: newContractType || oldContract.contractType,
+        sequence: (await prisma.contract.count({ where: { employeeId: oldContract.employeeId } })) + 1,
         startDate: new Date(newStartDate),
         endDate: new Date(newEndDate),
         status: 'AKTIF',
@@ -341,23 +343,47 @@ router.post(
 router.put('/:id', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
-    const { contractType, startDate, endDate, status, notes, documentUrl } = req.body;
+    const { contractType, startDate, endDate, status, notes, documentUrl, sequence } = req.body;
 
     const existing = await prisma.contract.findUnique({ where: { id } });
     if (!existing) {
       return res.status(404).json({ error: 'Kontrak tidak ditemukan.' });
     }
 
-    const updated = await prisma.contract.update({
-      where: { id },
-      data: {
-        contractType: contractType || existing.contractType,
-        startDate: startDate ? new Date(startDate) : existing.startDate,
-        endDate: endDate ? new Date(endDate) : existing.endDate,
-        status: status || existing.status,
-        notes: notes !== undefined ? notes : existing.notes,
-        documentUrl: documentUrl !== undefined ? documentUrl : existing.documentUrl,
-      },
+    const newSequence = sequence !== undefined && Number(sequence) > 0 ? Number(sequence) : undefined;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const updatedContract = await tx.contract.update({
+        where: { id },
+        data: {
+          contractType: contractType || existing.contractType,
+          startDate: startDate ? new Date(startDate) : existing.startDate,
+          endDate: endDate ? new Date(endDate) : existing.endDate,
+          status: status || existing.status,
+          notes: notes !== undefined ? notes : existing.notes,
+          documentUrl: documentUrl !== undefined ? documentUrl : existing.documentUrl,
+          sequence: newSequence !== undefined ? newSequence : existing.sequence,
+        },
+      });
+
+      // Re-normalize the employee's contracts to a clean 1..N order (no gaps or duplicates)
+      // when the admin changes the "Kontrak Ke" value.
+      if (newSequence !== undefined) {
+        const allContracts = await tx.contract.findMany({
+          where: { employeeId: existing.employeeId },
+          orderBy: [{ sequence: 'asc' }, { startDate: 'asc' }, { createdAt: 'asc' }],
+        });
+        for (let i = 0; i < allContracts.length; i++) {
+          if (allContracts[i].sequence !== i + 1) {
+            await tx.contract.update({
+              where: { id: allContracts[i].id },
+              data: { sequence: i + 1 },
+            });
+          }
+        }
+      }
+
+      return updatedContract;
     });
 
     await prisma.contractHistory.create({
@@ -370,10 +396,11 @@ router.put('/:id', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async 
       },
     });
 
-    await logAudit(req.user?.id, 'UPDATE_CONTRACT', 'CONTRACT', `Updated contract ${existing.contractNumber}`, req.ip || '');
+    await logAudit(req.user?.id, 'UPDATE_CONTRACT', 'CONTRACT', `Updated contract ${existing.contractNumber}${newSequence ? ` (Kontrak Ke-${newSequence})` : ''}`, req.ip || '');
 
     return res.json({ message: 'Data kontrak berhasil diperbarui.', contract: updated });
   } catch (error) {
+    console.error('Error updating contract:', error);
     return res.status(500).json({ error: 'Gagal memperbarui kontrak.' });
   }
 });

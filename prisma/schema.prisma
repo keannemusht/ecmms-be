@@ -89,6 +89,7 @@ model Contract {
   employee       Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   contractNumber String         @unique
   contractType   EmploymentType @default(PKWT)
+  sequence       Int            @default(1)
   startDate      DateTime
   endDate        DateTime
   status         ContractStatus @default(AKTIF)

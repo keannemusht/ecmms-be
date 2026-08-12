@@ -21,7 +21,7 @@ router.get('/', authenticateJWT, async (req: AuthRequest, res: Response) => {
         where: { id: req.user.employeeId },
         include: {
           contracts: {
-            orderBy: { createdAt: 'desc' },
+            orderBy: [{ sequence: 'asc' }],
           },
           submissions: {
             orderBy: { createdAt: 'desc' },
@@ -55,8 +55,7 @@ router.get('/', authenticateJWT, async (req: AuthRequest, res: Response) => {
       where: whereClause,
       include: {
         contracts: {
-          orderBy: { endDate: 'desc' },
-          take: 1,
+          orderBy: [{ sequence: 'asc' }],
         },
         user: {
           select: { id: true, email: true, role: true, isActive: true },
@@ -90,7 +89,7 @@ router.get('/:id', authenticateJWT, async (req: AuthRequest, res: Response) => {
               orderBy: { createdAt: 'desc' },
             },
           },
-          orderBy: { startDate: 'desc' },
+          orderBy: [{ sequence: 'asc' }],
         },
         submissions: {
           orderBy: { createdAt: 'desc' },
@@ -270,6 +269,7 @@ router.post('/bulk-import', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']
     let successCount = 0;
     let failedCount = 0;
     const errors: string[] = [];
+    const perNikNextSequence = new Map<string, number>();
 
     for (const emp of employees) {
       try {
@@ -287,7 +287,7 @@ router.post('/bulk-import', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']
           continue;
         }
 
-        await prisma.employee.upsert({
+        const employee = await prisma.employee.upsert({
           where: { nik: emp.nik },
           update: {
             name: emp.name,
@@ -309,6 +309,61 @@ router.post('/bulk-import', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']
             joinDate,
           },
         });
+
+        // Optional contract history columns: No Kontrak, Tgl Mulai, Tgl Berakhir, Jenis Kontrak.
+        // Repeating the same NIK on multiple rows records the 1st, 2nd, 3rd ... contract.
+        if (emp.contractNumber) {
+          const startDate = new Date(emp.contractStartDate);
+          const endDate = new Date(emp.contractEndDate);
+          if (
+            isNaN(startDate.getTime()) ||
+            isNaN(endDate.getTime()) ||
+            !isoPattern.test(String(emp.contractStartDate)) ||
+            !isoPattern.test(String(emp.contractEndDate))
+          ) {
+            failedCount++;
+            errors.push(`Baris dengan NIK ${emp.nik} (kontrak ${emp.contractNumber}): Tanggal kontrak tidak valid. Gunakan format YYYY-MM-DD.`);
+            continue;
+          }
+
+          let nextSeq = perNikNextSequence.get(emp.nik);
+          if (nextSeq === undefined) {
+            const existingCount = await prisma.contract.count({ where: { employeeId: employee.id } });
+            nextSeq = existingCount;
+            perNikNextSequence.set(emp.nik, nextSeq);
+          }
+          nextSeq += 1;
+          perNikNextSequence.set(emp.nik, nextSeq);
+
+          const today = new Date();
+          const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+          const contractType = (emp.contractType || emp.employmentType) as EmploymentType;
+
+          let status: 'AKTIF' | 'AKAN_BERAKHIR' | 'EXPIRED' | 'DIANGKAT_TETAP' = 'AKTIF';
+          if (diffDays <= 0) {
+            status = 'EXPIRED';
+          } else if (diffDays <= 30) {
+            status = 'AKAN_BERAKHIR';
+          }
+          if (contractType === 'PKWTT') {
+            status = 'DIANGKAT_TETAP';
+          }
+
+          await prisma.contract.create({
+            data: {
+              employeeId: employee.id,
+              contractNumber: String(emp.contractNumber),
+              contractType,
+              sequence: nextSeq,
+              startDate,
+              endDate,
+              status,
+              createdById: req.user?.id || null,
+              notes: `Import massal${emp.contractNotes ? `: ${emp.contractNotes}` : ''}`,
+            },
+          });
+        }
+
         successCount++;
       } catch (err: unknown) {
         failedCount++;
