@@ -12,6 +12,7 @@ import departmentRoutes from './routes/departments';
 import positionRoutes from './routes/positions';
 import auditLogRoutes from './routes/auditLogs';
 import { initCronJobs, runContractExpirationCheck } from './services/cronService';
+import { getEmailTemplatesDir } from './services/emailTemplate';
 import { uploadDirPath } from './utils/upload';
 
 const app = express();
@@ -29,6 +30,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve uploaded contract documents
 app.use('/uploads', express.static(uploadDirPath));
+
+// Serve bundled email assets (e.g. logo) so emails can hotlink reliably.
+app.use('/email-assets', express.static(getEmailTemplatesDir()));
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -62,8 +66,9 @@ app.get('/api/cron/contract-expiration', async (req, res) => {
   }
 
   try {
-    await runContractExpirationCheck();
-    return res.json({ ok: true });
+    const summary = await runContractExpirationCheck();
+    const ok = summary.errors.length === 0;
+    return res.status(ok ? 200 : 500).json({ ok, summary });
   } catch (error: any) {
     console.error('[Cron] Failed to run contract expiration check via cron endpoint:', error);
     return res.status(500).json({ ok: false, error: error?.message || String(error) });

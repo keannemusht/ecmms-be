@@ -13,6 +13,10 @@ function resolveTemplateDir(): string {
   return candidates.find((dir) => fs.existsSync(dir)) || candidates[0];
 }
 
+export function getEmailTemplatesDir(): string {
+  return resolveTemplateDir();
+}
+
 export function renderEmailTemplate(templateName: string, context: Record<string, unknown>): string {
   const dir = resolveTemplateDir();
   const file = path.join(dir, `${templateName}.hbs`);

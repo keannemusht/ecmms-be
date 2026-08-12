@@ -263,4 +263,49 @@ router.get('/logs', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async
   }
 });
 
+// DELETE /api/notifications/logs/:id — delete a single delivery log
+router.delete('/logs/:id', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (req: AuthRequest, res: Response) => {
+  try {
+    const id = String(req.params.id);
+
+    const existing = await prisma.notificationLog.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Log pengiriman tidak ditemukan.' });
+    }
+
+    await prisma.notificationLog.delete({ where: { id } });
+
+    await logAudit(
+      req.user?.id,
+      'DELETE_NOTIF_LOG',
+      'NOTIFICATION_LOG',
+      `Deleted delivery log untuk ${existing.recipient} (${existing.channel})`,
+      req.ip || ''
+    );
+
+    return res.json({ message: 'Log pengiriman berhasil dihapus.' });
+  } catch (error) {
+    return res.status(500).json({ error: 'Gagal menghapus log pengiriman.' });
+  }
+});
+
+// DELETE /api/notifications/logs — clear all delivery logs
+router.delete('/logs', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await prisma.notificationLog.deleteMany();
+
+    await logAudit(
+      req.user?.id,
+      'CLEAR_NOTIF_LOGS',
+      'NOTIFICATION_LOG',
+      `Cleared ${result.count} delivery logs`,
+      req.ip || ''
+    );
+
+    return res.json({ message: 'Semua log pengiriman berhasil dihapus.', deleted: result.count });
+  } catch (error) {
+    return res.status(500).json({ error: 'Gagal menghapus semua log pengiriman.' });
+  }
+});
+
 export default router;

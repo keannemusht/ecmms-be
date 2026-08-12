@@ -17,6 +17,7 @@ const departments_1 = __importDefault(require("./routes/departments"));
 const positions_1 = __importDefault(require("./routes/positions"));
 const auditLogs_1 = __importDefault(require("./routes/auditLogs"));
 const cronService_1 = require("./services/cronService");
+const emailTemplate_1 = require("./services/emailTemplate");
 const upload_1 = require("./utils/upload");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 8000;
@@ -29,6 +30,8 @@ app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
 // Serve uploaded contract documents
 app.use('/uploads', express_1.default.static(upload_1.uploadDirPath));
+// Serve bundled email assets (e.g. logo) so emails can hotlink reliably.
+app.use('/email-assets', express_1.default.static((0, emailTemplate_1.getEmailTemplatesDir)()));
 // API Routes
 app.use('/api/auth', auth_1.default);
 app.use('/api/dashboard', dashboard_1.default);

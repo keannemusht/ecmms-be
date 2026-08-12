@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getEmailTemplatesDir = getEmailTemplatesDir;
 exports.renderEmailTemplate = renderEmailTemplate;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
@@ -15,6 +16,9 @@ function resolveTemplateDir() {
         path_1.default.join(process.cwd(), 'dist/services/emailTemplates'),
     ];
     return candidates.find((dir) => fs_1.default.existsSync(dir)) || candidates[0];
+}
+function getEmailTemplatesDir() {
+    return resolveTemplateDir();
 }
 function renderEmailTemplate(templateName, context) {
     const dir = resolveTemplateDir();
