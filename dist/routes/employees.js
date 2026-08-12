@@ -21,7 +21,7 @@ router.get('/', auth_1.authenticateJWT, async (req, res) => {
                 where: { id: req.user.employeeId },
                 include: {
                     contracts: {
-                        orderBy: { createdAt: 'desc' },
+                        orderBy: [{ sequence: 'asc' }],
                     },
                     submissions: {
                         orderBy: { createdAt: 'desc' },
@@ -49,8 +49,7 @@ router.get('/', auth_1.authenticateJWT, async (req, res) => {
             where: whereClause,
             include: {
                 contracts: {
-                    orderBy: { endDate: 'desc' },
-                    take: 1,
+                    orderBy: [{ sequence: 'asc' }],
                 },
                 user: {
                     select: { id: true, email: true, role: true, isActive: true },
@@ -81,7 +80,7 @@ router.get('/:id', auth_1.authenticateJWT, async (req, res) => {
                             orderBy: { createdAt: 'desc' },
                         },
                     },
-                    orderBy: { startDate: 'desc' },
+                    orderBy: [{ sequence: 'asc' }],
                 },
                 submissions: {
                     orderBy: { createdAt: 'desc' },
@@ -236,6 +235,7 @@ router.post('/bulk-import', auth_1.authenticateJWT, (0, auth_1.requireRole)(['AD
         let successCount = 0;
         let failedCount = 0;
         const errors = [];
+        const perNikNextSequence = new Map();
         for (const emp of employees) {
             try {
                 if (!emp.nik || !emp.name || !emp.email || !emp.department || !emp.position || !emp.employmentType || !emp.joinDate) {
@@ -250,7 +250,7 @@ router.post('/bulk-import', auth_1.authenticateJWT, (0, auth_1.requireRole)(['AD
                     errors.push(`Baris dengan NIK ${emp.nik}: JoinDate '${emp.joinDate}' tidak valid. Gunakan format YYYY-MM-DD.`);
                     continue;
                 }
-                await prisma_1.default.employee.upsert({
+                const employee = await prisma_1.default.employee.upsert({
                     where: { nik: emp.nik },
                     update: {
                         name: emp.name,
@@ -272,6 +272,54 @@ router.post('/bulk-import', auth_1.authenticateJWT, (0, auth_1.requireRole)(['AD
                         joinDate,
                     },
                 });
+                // Optional contract history columns: No Kontrak, Tgl Mulai, Tgl Berakhir, Jenis Kontrak.
+                // Repeating the same NIK on multiple rows records the 1st, 2nd, 3rd ... contract.
+                if (emp.contractNumber) {
+                    const startDate = new Date(emp.contractStartDate);
+                    const endDate = new Date(emp.contractEndDate);
+                    if (isNaN(startDate.getTime()) ||
+                        isNaN(endDate.getTime()) ||
+                        !isoPattern.test(String(emp.contractStartDate)) ||
+                        !isoPattern.test(String(emp.contractEndDate))) {
+                        failedCount++;
+                        errors.push(`Baris dengan NIK ${emp.nik} (kontrak ${emp.contractNumber}): Tanggal kontrak tidak valid. Gunakan format YYYY-MM-DD.`);
+                        continue;
+                    }
+                    let nextSeq = perNikNextSequence.get(emp.nik);
+                    if (nextSeq === undefined) {
+                        const existingCount = await prisma_1.default.contract.count({ where: { employeeId: employee.id } });
+                        nextSeq = existingCount;
+                        perNikNextSequence.set(emp.nik, nextSeq);
+                    }
+                    nextSeq += 1;
+                    perNikNextSequence.set(emp.nik, nextSeq);
+                    const today = new Date();
+                    const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+                    const contractType = (emp.contractType || emp.employmentType);
+                    let status = 'AKTIF';
+                    if (diffDays <= 0) {
+                        status = 'EXPIRED';
+                    }
+                    else if (diffDays <= 30) {
+                        status = 'AKAN_BERAKHIR';
+                    }
+                    if (contractType === 'PKWTT') {
+                        status = 'DIANGKAT_TETAP';
+                    }
+                    await prisma_1.default.contract.create({
+                        data: {
+                            employeeId: employee.id,
+                            contractNumber: String(emp.contractNumber),
+                            contractType,
+                            sequence: nextSeq,
+                            startDate,
+                            endDate,
+                            status,
+                            createdById: req.user?.id || null,
+                            notes: `Import massal${emp.contractNotes ? `: ${emp.contractNotes}` : ''}`,
+                        },
+                    });
+                }
                 successCount++;
             }
             catch (err) {
