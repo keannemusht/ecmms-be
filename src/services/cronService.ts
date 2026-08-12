@@ -4,6 +4,7 @@ import { sendEmail, getEmailLogoUrl } from './notificationDelivery';
 import { buildWhatsAppMessage } from './whatsappNotification';
 import { logAudit } from '../utils/auditLogger';
 import { NotificationChannel, Role } from '@prisma/client';
+import { normalizeEmployeeContractStatuses } from './contractNormalizer';
 
 export interface CronRunSummary {
   contractsChecked: number;
@@ -322,6 +323,10 @@ export async function runContractExpirationCheck(): Promise<CronRunSummary> {
   try {
     const today = startOfToday();
 
+    // 0. Normalize contract statuses across all employees first
+    // (ensures superseded older contracts are marked DIPERPANJANG and only latest contracts are evaluated)
+    await normalizeEmployeeContractStatuses();
+
     // 1. Fetch active rules
     const rules = await prisma.notificationRule.findMany({
       where: { isActive: true },
@@ -349,10 +354,16 @@ export async function runContractExpirationCheck(): Promise<CronRunSummary> {
         const diffDays = Math.ceil(diffTime / (1000 * 3600 * 24));
 
         // Auto update status
+        // A contract is EXPIRED only when it is the employee's latest contract and has
+        // ended without a follow-up. Superseded contracts (those followed by the next
+        // contract) become DIPERPANJANG so they don't pollute the "Expired" list.
         if (diffDays <= 0 && contract.status !== 'EXPIRED') {
+          const hasSuccessor = await prisma.contract.count({
+            where: { employeeId: contract.employeeId, sequence: { gt: contract.sequence } },
+          });
           await prisma.contract.update({
             where: { id: contract.id },
-            data: { status: 'EXPIRED' },
+            data: { status: hasSuccessor > 0 ? 'DIPERPANJANG' : 'EXPIRED' },
           });
         } else if (diffDays > 0 && diffDays <= 30 && contract.status === 'AKTIF') {
           await prisma.contract.update({
@@ -361,20 +372,30 @@ export async function runContractExpirationCheck(): Promise<CronRunSummary> {
           });
         }
 
-        // Check matching rules
+        // Check matching rules (triggers when contract enters the rule threshold window)
         for (const rule of rules) {
-          if (rule.daysBefore === diffDays) {
-            const message = rule.template
-              .replace('{{employeeName}}', contract.employee.name)
-              .replace('{{contractNumber}}', contract.contractNumber)
-              .replace('{{endDate}}', formatDate(endDate));
+          if (diffDays <= rule.daysBefore && diffDays > 0) {
+            const ruleAlreadySent = await prisma.notificationLog.findFirst({
+              where: {
+                contractId: contract.id,
+                message: { contains: rule.name },
+                status: 'SENT',
+              },
+            });
 
-            const result = await dispatchRule(contract, rule, message);
-            summary.rulesDispatched++;
-            summary.emailsSent += result.emailsSent;
-            summary.emailsFailed += result.emailsFailed;
+            if (!ruleAlreadySent) {
+              const message = rule.template
+                .replace('{{employeeName}}', contract.employee.name)
+                .replace('{{contractNumber}}', contract.contractNumber)
+                .replace('{{endDate}}', formatDate(endDate));
 
-            console.log(`[Cron Alert] ${rule.channels.join('+')} dispatched for ${contract.employee.name} (${rule.name})`);
+              const result = await dispatchRule(contract, rule, message);
+              summary.rulesDispatched++;
+              summary.emailsSent += result.emailsSent;
+              summary.emailsFailed += result.emailsFailed;
+
+              console.log(`[Cron Alert] ${rule.channels.join('+')} dispatched for ${contract.employee.name} (${rule.name})`);
+            }
           }
         }
 

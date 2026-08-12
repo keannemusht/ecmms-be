@@ -1,12 +1,16 @@
 import { Router, Response } from 'express';
 import prisma from '../prisma';
 import { authenticateJWT, AuthRequest, requireRole } from '../middleware/auth';
+import { normalizeEmployeeContractStatuses } from '../services/contractNormalizer';
 
 const router = Router();
 
 // GET /api/dashboard/summary
 router.get('/summary', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (req: AuthRequest, res: Response) => {
   try {
+    // Ensure contracts are normalized before summarizing
+    await normalizeEmployeeContractStatuses();
+
     const today = new Date();
 
     // Counts by Employment Type

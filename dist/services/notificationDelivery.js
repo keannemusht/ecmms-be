@@ -5,15 +5,19 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getEmailLogoUrl = getEmailLogoUrl;
 exports.sendEmail = sendEmail;
+require("dotenv/config");
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const emailTemplate_1 = require("./emailTemplate");
-const SMTP_HOST = process.env.SMTP_HOST || '';
-const SMTP_PORT = parseInt(process.env.SMTP_PORT || (SMTP_HOST === 'smtp.gmail.com' ? '465' : '587'), 10);
-const SMTP_USER = process.env.SMTP_USER || process.env.MAIL_USER || '';
-const SMTP_PASS = process.env.SMTP_PASS || process.env.MAIL_PASS || '';
-const SMTP_FROM = process.env.SMTP_FROM || (SMTP_USER ? `ECMMS <${SMTP_USER}>` : 'no-reply@ecmms.local');
+function getSmtpConfig() {
+    const host = process.env.SMTP_HOST || (process.env.SMTP_USER || process.env.MAIL_USER ? 'smtp.gmail.com' : '');
+    const port = parseInt(process.env.SMTP_PORT || (host === 'smtp.gmail.com' ? '465' : '587'), 10);
+    const user = process.env.SMTP_USER || process.env.MAIL_USER || '';
+    const pass = process.env.SMTP_PASS || process.env.MAIL_PASS || '';
+    const from = process.env.SMTP_FROM || (user ? `ECMMS <${user}>` : 'no-reply@ecmms.local');
+    return { host, port, user, pass, from };
+}
 const LOGO_FILENAME = 'bbp_logo_202409_LeftAligment.png';
 let cachedLogoDataUri = null;
 function resolveLogoFile() {
@@ -56,25 +60,24 @@ function getEmailLogoUrl() {
 }
 let transporter = null;
 function getTransporter() {
-    // Prefer explicit SMTP config; fall back to Gmail app password (MAIL_USER/MAIL_PASS).
-    const host = SMTP_HOST || (SMTP_USER && SMTP_PASS ? 'smtp.gmail.com' : '');
-    if (!host) {
-        return null;
+    const config = getSmtpConfig();
+    if (!config.host) {
+        return { transporter: null, from: config.from };
     }
     if (!transporter) {
         transporter = nodemailer_1.default.createTransport({
-            host,
-            port: SMTP_PORT,
-            secure: SMTP_PORT === 465,
-            auth: SMTP_USER && SMTP_PASS ? { user: SMTP_USER, pass: SMTP_PASS } : undefined,
+            host: config.host,
+            port: config.port,
+            secure: config.port === 465,
+            auth: config.user && config.pass ? { user: config.user, pass: config.pass } : undefined,
         });
     }
-    return transporter;
+    return { transporter, from: config.from };
 }
 async function sendEmail(to, subject, content) {
-    const t = getTransporter();
+    const { transporter: t, from: smtpFrom } = getTransporter();
     if (!t) {
-        return { ok: false, error: 'SMTP tidak dikonfigurasi (SMTP_HOST kosong).' };
+        return { ok: false, error: 'SMTP tidak dikonfigurasi (SMTP_HOST atau MAIL_USER/MAIL_PASS kosong).' };
     }
     let text;
     let html;
@@ -93,7 +96,7 @@ async function sendEmail(to, subject, content) {
         }
     }
     try {
-        await t.sendMail({ from: SMTP_FROM, to, subject, html, text });
+        await t.sendMail({ from: smtpFrom, to, subject, html, text });
         return { ok: true };
     }
     catch (error) {

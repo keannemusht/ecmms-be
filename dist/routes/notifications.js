@@ -8,6 +8,7 @@ const prisma_1 = __importDefault(require("../prisma"));
 const auth_1 = require("../middleware/auth");
 const auditLogger_1 = require("../utils/auditLogger");
 const whatsappNotification_1 = require("../services/whatsappNotification");
+const cronService_1 = require("../services/cronService");
 const router = (0, express_1.Router)();
 const CATEGORY_KEYWORDS = {
     expiration: ['kontrak', 'contract', 'jatuh', 'berakhir', 'expire', 'expiring'],
@@ -260,6 +261,17 @@ router.delete('/logs', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN',
     }
     catch (error) {
         return res.status(500).json({ error: 'Gagal menghapus semua log pengiriman.' });
+    }
+});
+// POST /api/notifications/run-cron — manual execution trigger for notification check
+router.post('/run-cron', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MANAGEMENT']), async (req, res) => {
+    try {
+        const summary = await (0, cronService_1.runContractExpirationCheck)();
+        await (0, auditLogger_1.logAudit)(req.user?.id, 'MANUAL_CRON_RUN', 'NOTIFICATION', `Manual cron check ran: rules=${summary.rulesDispatched}, emails=${summary.emailsSent}`, req.ip || '');
+        return res.json({ message: 'Proses cek notifikasi & jatuh tempo berhasil dijalankan.', summary });
+    }
+    catch (error) {
+        return res.status(500).json({ error: error?.message || 'Gagal menjalankan cek notifikasi.' });
     }
 });
 exports.default = router;

@@ -9,6 +9,7 @@ const auth_1 = require("../middleware/auth");
 const auditLogger_1 = require("../utils/auditLogger");
 const upload_1 = require("../utils/upload");
 const whatsappNotification_1 = require("../services/whatsappNotification");
+const contractNormalizer_1 = require("../services/contractNormalizer");
 const router = (0, express_1.Router)();
 // GET /api/contracts
 router.get('/', auth_1.authenticateJWT, async (req, res) => {
@@ -166,6 +167,8 @@ router.post('/', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MANA
                 employee: true,
             },
         });
+        // Normalize contract statuses for this employee so superseded contracts become DIPERPANJANG
+        await (0, contractNormalizer_1.normalizeEmployeeContractStatuses)(employeeId);
         await prisma_1.default.contractHistory.create({
             data: {
                 contractId: contract.id,
@@ -241,6 +244,8 @@ router.post('/:id/extend', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADM
             },
             include: { employee: true },
         });
+        // Normalize contract statuses for this employee so superseded contracts become DIPERPANJANG
+        await (0, contractNormalizer_1.normalizeEmployeeContractStatuses)(oldContract.employeeId);
         await prisma_1.default.contractHistory.create({
             data: {
                 contractId: newContract.id,
@@ -344,6 +349,7 @@ router.put('/:id', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MA
                 changedById: req.user?.id,
             },
         });
+        await (0, contractNormalizer_1.normalizeEmployeeContractStatuses)(existing.employeeId);
         await (0, auditLogger_1.logAudit)(req.user?.id, 'UPDATE_CONTRACT', 'CONTRACT', `Updated contract ${existing.contractNumber}${newSequence ? ` (Kontrak Ke-${newSequence})` : ''}`, req.ip || '');
         return res.json({ message: 'Data kontrak berhasil diperbarui.', contract: updated });
     }
@@ -364,6 +370,7 @@ router.delete('/:id', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 
             return res.status(404).json({ error: 'Kontrak tidak ditemukan.' });
         }
         await prisma_1.default.contract.delete({ where: { id } });
+        await (0, contractNormalizer_1.normalizeEmployeeContractStatuses)(existing.employeeId);
         await (0, auditLogger_1.logAudit)(req.user?.id, 'DELETE_CONTRACT', 'CONTRACT', `Deleted contract ${existing.contractNumber} for ${existing.employee?.name || ''}`, req.ip || '');
         return res.json({ message: 'Kontrak berhasil dihapus.' });
     }

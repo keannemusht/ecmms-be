@@ -6,10 +6,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const prisma_1 = __importDefault(require("../prisma"));
 const auth_1 = require("../middleware/auth");
+const contractNormalizer_1 = require("../services/contractNormalizer");
 const router = (0, express_1.Router)();
 // GET /api/dashboard/summary
 router.get('/summary', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MANAGEMENT']), async (req, res) => {
     try {
+        // Ensure contracts are normalized before summarizing
+        await (0, contractNormalizer_1.normalizeEmployeeContractStatuses)();
         const today = new Date();
         // Counts by Employment Type
         const totalEmployees = await prisma_1.default.employee.count();

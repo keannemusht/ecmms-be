@@ -8,6 +8,7 @@ const prisma_1 = __importDefault(require("../prisma"));
 const auth_1 = require("../middleware/auth");
 const auditLogger_1 = require("../utils/auditLogger");
 const whatsappNotification_1 = require("../services/whatsappNotification");
+const contractNormalizer_1 = require("../services/contractNormalizer");
 const router = (0, express_1.Router)();
 // GET /api/employees
 router.get('/', auth_1.authenticateJWT, async (req, res) => {
@@ -306,7 +307,7 @@ router.post('/bulk-import', auth_1.authenticateJWT, (0, auth_1.requireRole)(['AD
                     if (contractType === 'PKWTT') {
                         status = 'DIANGKAT_TETAP';
                     }
-                    await prisma_1.default.contract.create({
+                    const createdContract = await prisma_1.default.contract.create({
                         data: {
                             employeeId: employee.id,
                             contractNumber: String(emp.contractNumber),
@@ -319,6 +320,15 @@ router.post('/bulk-import', auth_1.authenticateJWT, (0, auth_1.requireRole)(['AD
                             notes: `Import massal${emp.contractNotes ? `: ${emp.contractNotes}` : ''}`,
                         },
                     });
+                    // This contract is the successor of any earlier contract for this employee,
+                    // so previously EXPIRED contracts (including earlier rows of this same
+                    // import) become historical DIPERPANJANG instead of showing under "Expired".
+                    // The just-created contract is excluded: if it is the employee's latest and
+                    // ended, it correctly stays EXPIRED.
+                    await prisma_1.default.contract.updateMany({
+                        where: { employeeId: employee.id, status: 'EXPIRED', id: { not: createdContract.id } },
+                        data: { status: 'DIPERPANJANG' },
+                    });
                 }
                 successCount++;
             }
@@ -328,6 +338,8 @@ router.post('/bulk-import', auth_1.authenticateJWT, (0, auth_1.requireRole)(['AD
                 errors.push(`Error NIK ${emp.nik}: ${errorMessage}`);
             }
         }
+        // Normalize contract statuses across all employees after bulk import completes
+        await (0, contractNormalizer_1.normalizeEmployeeContractStatuses)();
         await (0, auditLogger_1.logAudit)(req.user?.id, 'BULK_IMPORT', 'EMPLOYEE', `Imported ${successCount} employees (${failedCount} failed)`, req.ip || '');
         return res.json({
             message: `Proses import selesai. Berhasil: ${successCount}, Gagal: ${failedCount}`,

@@ -3,6 +3,7 @@ import prisma from '../prisma';
 import { authenticateJWT, AuthRequest, requireRole } from '../middleware/auth';
 import { logAudit } from '../utils/auditLogger';
 import { buildWhatsAppLink } from '../services/whatsappNotification';
+import { runContractExpirationCheck } from '../services/cronService';
 import { Prisma } from '@prisma/client';
 
 const router = Router();
@@ -305,6 +306,23 @@ router.delete('/logs', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), as
     return res.json({ message: 'Semua log pengiriman berhasil dihapus.', deleted: result.count });
   } catch (error) {
     return res.status(500).json({ error: 'Gagal menghapus semua log pengiriman.' });
+  }
+});
+
+// POST /api/notifications/run-cron — manual execution trigger for notification check
+router.post('/run-cron', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (req: AuthRequest, res: Response) => {
+  try {
+    const summary = await runContractExpirationCheck();
+    await logAudit(
+      req.user?.id,
+      'MANUAL_CRON_RUN',
+      'NOTIFICATION',
+      `Manual cron check ran: rules=${summary.rulesDispatched}, emails=${summary.emailsSent}`,
+      req.ip || ''
+    );
+    return res.json({ message: 'Proses cek notifikasi & jatuh tempo berhasil dijalankan.', summary });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || 'Gagal menjalankan cek notifikasi.' });
   }
 });
 

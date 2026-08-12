@@ -4,6 +4,7 @@ import { authenticateJWT, AuthRequest, requireRole } from '../middleware/auth';
 import { logAudit } from '../utils/auditLogger';
 import { buildWhatsAppLink } from '../services/whatsappNotification';
 import { Prisma, EmploymentType } from '@prisma/client';
+import { normalizeEmployeeContractStatuses } from '../services/contractNormalizer';
 
 const router = Router();
 
@@ -349,7 +350,7 @@ router.post('/bulk-import', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']
             status = 'DIANGKAT_TETAP';
           }
 
-          await prisma.contract.create({
+          const createdContract = await prisma.contract.create({
             data: {
               employeeId: employee.id,
               contractNumber: String(emp.contractNumber),
@@ -362,6 +363,16 @@ router.post('/bulk-import', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']
               notes: `Import massal${emp.contractNotes ? `: ${emp.contractNotes}` : ''}`,
             },
           });
+
+          // This contract is the successor of any earlier contract for this employee,
+          // so previously EXPIRED contracts (including earlier rows of this same
+          // import) become historical DIPERPANJANG instead of showing under "Expired".
+          // The just-created contract is excluded: if it is the employee's latest and
+          // ended, it correctly stays EXPIRED.
+          await prisma.contract.updateMany({
+            where: { employeeId: employee.id, status: 'EXPIRED', id: { not: createdContract.id } },
+            data: { status: 'DIPERPANJANG' },
+          });
         }
 
         successCount++;
@@ -371,6 +382,9 @@ router.post('/bulk-import', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']
         errors.push(`Error NIK ${emp.nik}: ${errorMessage}`);
       }
     }
+
+    // Normalize contract statuses across all employees after bulk import completes
+    await normalizeEmployeeContractStatuses();
 
     await logAudit(req.user?.id, 'BULK_IMPORT', 'EMPLOYEE', `Imported ${successCount} employees (${failedCount} failed)`, req.ip || '');
 

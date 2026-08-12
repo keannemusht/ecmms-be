@@ -5,6 +5,7 @@ import { logAudit } from '../utils/auditLogger';
 import { uploadContractDocument } from '../utils/upload';
 import { buildWhatsAppLink, buildWhatsAppMessage } from '../services/whatsappNotification';
 import { Prisma, ContractStatus, EmploymentType } from '@prisma/client';
+import { normalizeEmployeeContractStatuses } from '../services/contractNormalizer';
 
 const router = Router();
 
@@ -184,6 +185,9 @@ router.post('/', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (r
       },
     });
 
+    // Normalize contract statuses for this employee so superseded contracts become DIPERPANJANG
+    await normalizeEmployeeContractStatuses(employeeId);
+
     await prisma.contractHistory.create({
       data: {
         contractId: contract.id,
@@ -271,6 +275,9 @@ router.post('/:id/extend', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT'])
       },
       include: { employee: true },
     });
+
+    // Normalize contract statuses for this employee so superseded contracts become DIPERPANJANG
+    await normalizeEmployeeContractStatuses(oldContract.employeeId);
 
     await prisma.contractHistory.create({
       data: {
@@ -396,6 +403,8 @@ router.put('/:id', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async 
       },
     });
 
+    await normalizeEmployeeContractStatuses(existing.employeeId);
+
     await logAudit(req.user?.id, 'UPDATE_CONTRACT', 'CONTRACT', `Updated contract ${existing.contractNumber}${newSequence ? ` (Kontrak Ke-${newSequence})` : ''}`, req.ip || '');
 
     return res.json({ message: 'Data kontrak berhasil diperbarui.', contract: updated });
@@ -419,6 +428,8 @@ router.delete('/:id', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), asy
     }
 
     await prisma.contract.delete({ where: { id } });
+
+    await normalizeEmployeeContractStatuses(existing.employeeId);
 
     await logAudit(req.user?.id, 'DELETE_CONTRACT', 'CONTRACT', `Deleted contract ${existing.contractNumber} for ${existing.employee?.name || ''}`, req.ip || '');
 
