@@ -8,8 +8,9 @@ const prisma_1 = __importDefault(require("../prisma"));
 const cronService_1 = require("../services/cronService");
 async function main() {
     console.log('[Test Cron] Running contract expiration check now...');
-    await (0, cronService_1.runContractExpirationCheck)();
-    console.log('[Test Cron] Done. Check NotificationLog (or Notifications -> Log Pengiriman in the UI) for results.');
+    const summary = await (0, cronService_1.runContractExpirationCheck)();
+    console.log('[Test Cron] Done. Summary:', JSON.stringify(summary, null, 2));
+    console.log('[Test Cron] Check NotificationLog (or Notifications -> Log Pengiriman in the UI) for results.');
 }
 main()
     .catch((e) => {

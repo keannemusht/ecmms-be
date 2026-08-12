@@ -9,6 +9,7 @@ const node_cron_1 = __importDefault(require("node-cron"));
 const prisma_1 = __importDefault(require("../prisma"));
 const notificationDelivery_1 = require("./notificationDelivery");
 const whatsappNotification_1 = require("./whatsappNotification");
+const auditLogger_1 = require("../utils/auditLogger");
 function formatDate(d) {
     return d.toISOString().split('T')[0];
 }
@@ -107,6 +108,21 @@ async function logNotification(params) {
 async function dispatchRule(contract, rule, message) {
     const title = `Alert Kontrak (${rule.name})`;
     const allUserIds = new Set();
+    let emailsSent = 0;
+    let emailsFailed = 0;
+    const today = startOfToday();
+    const alreadySent = await prisma_1.default.notificationLog.findFirst({
+        where: {
+            contractId: contract.id,
+            message,
+            status: 'SENT',
+            sentAt: { gte: today },
+        },
+    });
+    if (alreadySent) {
+        console.log(`[Cron Alert] Skipped duplicate dispatch for ${contract.employee.name} (${rule.name}) - already sent today`);
+        return { emailsSent, emailsFailed };
+    }
     for (const targetRole of rule.targetRoles) {
         const recipients = await resolveRecipients(targetRole, contract.employee);
         for (const userId of recipients.userIds) {
@@ -128,6 +144,12 @@ async function dispatchRule(contract, rule, message) {
                             footerText: 'Pesan ini dikirim otomatis oleh sistem monitoring kontrak PKWT.',
                         }),
                     });
+                    if (result.ok) {
+                        emailsSent++;
+                    }
+                    else {
+                        emailsFailed++;
+                    }
                     await logNotification({
                         contractId: contract.id,
                         recipient: email,
@@ -166,6 +188,7 @@ async function dispatchRule(contract, rule, message) {
     for (const userId of userIds) {
         await logNotification({ contractId: contract.id, recipient: userId, channel: 'IN_APP', status: 'SENT', message });
     }
+    return { emailsSent, emailsFailed };
 }
 async function runEscalation(contract) {
     const today = startOfToday();
@@ -177,8 +200,10 @@ async function runEscalation(contract) {
         },
     });
     if (alreadySent) {
-        return;
+        return { escalated: false, emailsSent: 0, emailsFailed: 0 };
     }
+    let emailsSent = 0;
+    let emailsFailed = 0;
     const message = `Eskalasi: Kontrak ${contract.employee.name} (${contract.contractNumber}) telah melewati tanggal berakhir (${formatDate(new Date(contract.endDate))}) dan belum ada tindak lanjut.`;
     const recipients = await resolveRecipients('MANAGEMENT', contract.employee);
     await sendInApp(recipients.userIds, 'Eskalasi Kontrak', message);
@@ -203,6 +228,12 @@ async function runEscalation(contract) {
                 footerTextEn: 'Please follow up on contracts that have passed their end date.',
             }),
         });
+        if (result.ok) {
+            emailsSent++;
+        }
+        else {
+            emailsFailed++;
+        }
         await logNotification({
             contractId: contract.id,
             recipient: email,
@@ -213,8 +244,17 @@ async function runEscalation(contract) {
         });
     }
     console.log(`[Cron Escalation] Escalated for ${contract.employee.name} (${contract.contractNumber})`);
+    return { escalated: true, emailsSent, emailsFailed };
 }
 async function runContractExpirationCheck() {
+    const summary = {
+        contractsChecked: 0,
+        rulesDispatched: 0,
+        escalations: 0,
+        emailsSent: 0,
+        emailsFailed: 0,
+        errors: [],
+    };
     console.log('[Cron] Running daily contract expiration and notification check...');
     try {
         const today = startOfToday();
@@ -234,43 +274,72 @@ async function runContractExpirationCheck() {
             },
         });
         for (const contract of contracts) {
-            const endDate = new Date(contract.endDate);
-            endDate.setHours(0, 0, 0, 0);
-            const diffTime = endDate.getTime() - today.getTime();
-            const diffDays = Math.ceil(diffTime / (1000 * 3600 * 24));
-            // Auto update status
-            if (diffDays <= 0 && contract.status !== 'EXPIRED') {
-                await prisma_1.default.contract.update({
-                    where: { id: contract.id },
-                    data: { status: 'EXPIRED' },
-                });
-            }
-            else if (diffDays > 0 && diffDays <= 30 && contract.status === 'AKTIF') {
-                await prisma_1.default.contract.update({
-                    where: { id: contract.id },
-                    data: { status: 'AKAN_BERAKHIR' },
-                });
-            }
-            // Check matching rules
-            for (const rule of rules) {
-                if (rule.daysBefore === diffDays) {
-                    const message = rule.template
-                        .replace('{{employeeName}}', contract.employee.name)
-                        .replace('{{contractNumber}}', contract.contractNumber)
-                        .replace('{{endDate}}', formatDate(endDate));
-                    await dispatchRule(contract, rule, message);
-                    console.log(`[Cron Alert] ${rule.channels.join('+')} dispatched for ${contract.employee.name} (${rule.name})`);
+            summary.contractsChecked++;
+            try {
+                const endDate = new Date(contract.endDate);
+                endDate.setHours(0, 0, 0, 0);
+                const diffTime = endDate.getTime() - today.getTime();
+                const diffDays = Math.ceil(diffTime / (1000 * 3600 * 24));
+                // Auto update status
+                if (diffDays <= 0 && contract.status !== 'EXPIRED') {
+                    await prisma_1.default.contract.update({
+                        where: { id: contract.id },
+                        data: { status: 'EXPIRED' },
+                    });
+                }
+                else if (diffDays > 0 && diffDays <= 30 && contract.status === 'AKTIF') {
+                    await prisma_1.default.contract.update({
+                        where: { id: contract.id },
+                        data: { status: 'AKAN_BERAKHIR' },
+                    });
+                }
+                // Check matching rules
+                for (const rule of rules) {
+                    if (rule.daysBefore === diffDays) {
+                        const message = rule.template
+                            .replace('{{employeeName}}', contract.employee.name)
+                            .replace('{{contractNumber}}', contract.contractNumber)
+                            .replace('{{endDate}}', formatDate(endDate));
+                        const result = await dispatchRule(contract, rule, message);
+                        summary.rulesDispatched++;
+                        summary.emailsSent += result.emailsSent;
+                        summary.emailsFailed += result.emailsFailed;
+                        console.log(`[Cron Alert] ${rule.channels.join('+')} dispatched for ${contract.employee.name} (${rule.name})`);
+                    }
+                }
+                // Escalation for overdue contracts with no follow-up (from H+1 onward)
+                if (diffDays < 0) {
+                    const result = await runEscalation(contract);
+                    if (result.escalated) {
+                        summary.escalations++;
+                    }
+                    summary.emailsSent += result.emailsSent;
+                    summary.emailsFailed += result.emailsFailed;
                 }
             }
-            // Escalation for overdue contracts with no follow-up (H+1 rule)
-            if (diffDays <= 0 && contract.status === 'EXPIRED') {
-                await runEscalation(contract);
+            catch (error) {
+                const message = `Gagal proses kontrak ${contract.contractNumber} (${contract.id}): ${error?.message || String(error)}`;
+                console.error(`[Cron Error] ${message}`);
+                summary.errors.push(message);
             }
         }
+        const detail = [
+            `kontrak=${summary.contractsChecked}`,
+            `rule=${summary.rulesDispatched}`,
+            `eskalasi=${summary.escalations}`,
+            `email terkirim=${summary.emailsSent}`,
+            `email gagal=${summary.emailsFailed}`,
+            ...(summary.errors.length > 0 ? [`error=${summary.errors.length}`] : []),
+        ].join(', ');
+        await (0, auditLogger_1.logAudit)(null, 'NOTIFICATION_CRON_RUN', 'CRON', `${summary.errors.length > 0 ? 'GAGAL PARSIAL: ' : ''}${detail}`);
     }
     catch (error) {
-        console.error('[Cron Error] Failed to run contract expiration check:', error);
+        const message = `Failed to run contract expiration check: ${error?.message || String(error)}`;
+        console.error('[Cron Error]', message);
+        summary.errors.push(message);
+        await (0, auditLogger_1.logAudit)(null, 'NOTIFICATION_CRON_RUN', 'CRON', `GAGAL: ${message}`);
     }
+    return summary;
 }
 function initCronJobs() {
     // Run once daily at 01:00 AM

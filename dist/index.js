@@ -60,8 +60,9 @@ app.get('/api/cron/contract-expiration', async (req, res) => {
         return res.status(401).json({ error: 'Unauthorized.' });
     }
     try {
-        await (0, cronService_1.runContractExpirationCheck)();
-        return res.json({ ok: true });
+        const summary = await (0, cronService_1.runContractExpirationCheck)();
+        const ok = summary.errors.length === 0;
+        return res.status(ok ? 200 : 500).json({ ok, summary });
     }
     catch (error) {
         console.error('[Cron] Failed to run contract expiration check via cron endpoint:', error);
