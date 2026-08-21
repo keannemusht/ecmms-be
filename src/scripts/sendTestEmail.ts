@@ -12,6 +12,7 @@ async function main() {
     context: {
       appName: 'ECMMS',
       appTagline: 'Employee Contract Management & Monitoring System',
+      subject: 'ECMMS - Test Email Notification',
       logoUrl: getEmailLogoUrl(),
       en: {
         title: 'Test Notification',

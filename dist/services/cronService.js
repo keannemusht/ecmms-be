@@ -22,6 +22,7 @@ function buildEmailContext(params) {
     return {
         appName: 'ECMMS',
         appTagline: 'Employee Contract Management & Monitoring System',
+        subject: params.titleEn || params.title,
         logoUrl: (0, notificationDelivery_1.getEmailLogoUrl)(),
         en: {
             title: params.titleEn || 'Contract Alert',
