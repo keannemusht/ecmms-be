@@ -22,27 +22,20 @@ const LOGO_FILENAME = 'bbp_logo_202409_LeftAligment.png';
 function resolveLogoFile() {
     const candidates = [
         path_1.default.join(__dirname, 'emailTemplates', LOGO_FILENAME),
-        path_1.default.join(process.cwd(), 'src/services/emailTemplates', LOGO_FILENAME),
-        path_1.default.join(process.cwd(), 'dist/services/emailTemplates', LOGO_FILENAME),
+        path_1.default.join(__dirname, LOGO_FILENAME),
+        path_1.default.join(process.cwd(), 'src', 'services', 'emailTemplates', LOGO_FILENAME),
+        path_1.default.join(process.cwd(), 'dist', 'services', 'emailTemplates', LOGO_FILENAME),
     ];
     return candidates.find((p) => fs_1.default.existsSync(p)) || '';
 }
 /**
  * Resolves the email logo URL so it renders reliably across environments.
- * Priority: explicit EMAIL_LOGO_URL -> backend-served asset (Vercel/base URL)
- * -> frontend public URL -> embedded base64 data URI.
+ * Priority: explicit EMAIL_LOGO_URL -> CID embedding (cid:logo).
  */
 function getEmailLogoUrl() {
     const explicit = process.env.EMAIL_LOGO_URL;
     if (explicit)
         return explicit;
-    const base = process.env.EMAIL_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL.replace(/^https?:\/\//, '')}` : '');
-    if (base)
-        return `${base.replace(/\/+$/, '')}/email-assets/${LOGO_FILENAME}`;
-    const frontend = process.env.FRONTEND_URL;
-    if (frontend && !/localhost|127\.0\.0\.1/.test(frontend)) {
-        return `${frontend.replace(/\/+$/, '')}/img/${LOGO_FILENAME}`;
-    }
     return 'cid:logo';
 }
 let transporter = null;
