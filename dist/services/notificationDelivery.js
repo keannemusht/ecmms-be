@@ -19,7 +19,6 @@ function getSmtpConfig() {
     return { host, port, user, pass, from };
 }
 const LOGO_FILENAME = 'bbp_logo_202409_LeftAligment.png';
-let cachedLogoDataUri = null;
 function resolveLogoFile() {
     const candidates = [
         path_1.default.join(__dirname, 'emailTemplates', LOGO_FILENAME),
@@ -44,19 +43,7 @@ function getEmailLogoUrl() {
     if (frontend && !/localhost|127\.0\.0\.1/.test(frontend)) {
         return `${frontend.replace(/\/+$/, '')}/img/${LOGO_FILENAME}`;
     }
-    if (cachedLogoDataUri !== null)
-        return cachedLogoDataUri;
-    const logoPath = resolveLogoFile();
-    if (logoPath) {
-        try {
-            cachedLogoDataUri = `data:image/png;base64,${fs_1.default.readFileSync(logoPath).toString('base64')}`;
-            return cachedLogoDataUri;
-        }
-        catch (error) {
-            console.warn('[Email] Failed to read logo file for embedding:', error);
-        }
-    }
-    return '';
+    return 'cid:logo';
 }
 let transporter = null;
 function getTransporter() {
@@ -95,8 +82,19 @@ async function sendEmail(to, subject, content) {
             }
         }
     }
+    const attachments = [];
+    if (html && html.includes('cid:logo')) {
+        const logoPath = resolveLogoFile();
+        if (logoPath) {
+            attachments.push({
+                filename: LOGO_FILENAME,
+                path: logoPath,
+                cid: 'logo',
+            });
+        }
+    }
     try {
-        await t.sendMail({ from: smtpFrom, to, subject, html, text });
+        await t.sendMail({ from: smtpFrom, to, subject, html, text, attachments });
         return { ok: true };
     }
     catch (error) {

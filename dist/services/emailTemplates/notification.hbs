@@ -13,7 +13,10 @@
 
           <!-- Header -->
           <tr>
-            <td style="background-color:#FFFFFF; padding:20px 32px; border-bottom:3px solid #9C6B2E;">
+            <td style="background-color:#FFFFFF; padding:24px 32px 20px; border-bottom:3px solid #9C6B2E;">
+              {{#if logoUrl}}
+              <img src="{{logoUrl}}" alt="Logo" style="display:block; max-width:180px; height:auto; border:0; margin-bottom:14px;" />
+              {{/if}}
               <span style="font-size:16px; font-weight:700; color:#9C6B2E; letter-spacing:0.5px;">{{appName}}</span>
               <span style="display:block; font-size:11px; color:#4B5563; margin-top:4px;">{{appTagline}}</span>
             </td>
