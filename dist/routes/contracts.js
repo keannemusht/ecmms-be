@@ -14,7 +14,7 @@ const router = (0, express_1.Router)();
 // GET /api/contracts
 router.get('/', auth_1.authenticateJWT, async (req, res) => {
     try {
-        const { status, contractType, search } = req.query;
+        const { status, contractType, search, dateType, dateFrom, dateTo, sortBy, sortOrder } = req.query;
         const whereClause = {};
         if (req.user?.role === 'USER') {
             if (!req.user.employeeId) {
@@ -36,6 +36,34 @@ router.get('/', auth_1.authenticateJWT, async (req, res) => {
                     { employee: { nik: { contains: String(search), mode: 'insensitive' } } },
                 ];
             }
+            if (dateFrom || dateTo) {
+                const field = dateType === 'startDate' ? 'startDate' : 'endDate';
+                const dateFilter = {};
+                if (dateFrom) {
+                    dateFilter.gte = new Date(String(dateFrom) + 'T00:00:00.000Z');
+                }
+                if (dateTo) {
+                    dateFilter.lte = new Date(String(dateTo) + 'T23:59:59.999Z');
+                }
+                whereClause[field] = dateFilter;
+            }
+        }
+        const orderDir = sortOrder === 'desc' ? 'desc' : 'asc';
+        let orderByClause = { endDate: orderDir };
+        if (sortBy === 'startDate') {
+            orderByClause = { startDate: orderDir };
+        }
+        else if (sortBy === 'contractNumber') {
+            orderByClause = { contractNumber: orderDir };
+        }
+        else if (sortBy === 'sequence') {
+            orderByClause = { sequence: orderDir };
+        }
+        else if (sortBy === 'employeeName') {
+            orderByClause = { employee: { name: orderDir } };
+        }
+        else if (sortBy === 'status') {
+            orderByClause = { status: orderDir };
         }
         const contracts = await prisma_1.default.contract.findMany({
             where: whereClause,
@@ -45,7 +73,7 @@ router.get('/', auth_1.authenticateJWT, async (req, res) => {
                     select: { id: true, name: true, email: true },
                 },
             },
-            orderBy: { endDate: 'asc' },
+            orderBy: orderByClause,
         });
         return res.json({ contracts, total: contracts.length });
     }
@@ -129,12 +157,15 @@ router.get('/:id', auth_1.authenticateJWT, async (req, res) => {
 router.post('/', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MANAGEMENT']), async (req, res) => {
     try {
         const { employeeId, contractNumber, contractType, startDate, endDate, notes, documentUrl } = req.body;
-        if (!employeeId || !contractNumber || !contractType || !startDate || !endDate) {
-            return res.status(400).json({ error: 'Field wajib: Karyawan, No Kontrak, Jenis Kontrak, Tanggal Mulai, Tanggal Berakhir.' });
+        if (!employeeId || !contractType || !startDate || !endDate) {
+            return res.status(400).json({ error: 'Field wajib: Karyawan, Jenis Kontrak, Tanggal Mulai, Tanggal Berakhir.' });
         }
-        const existingNumber = await prisma_1.default.contract.findUnique({ where: { contractNumber } });
-        if (existingNumber) {
-            return res.status(400).json({ error: `Nomor kontrak '${contractNumber}' sudah terdaftar.` });
+        const cleanContractNumber = contractNumber && String(contractNumber).trim() !== '' ? String(contractNumber).trim() : null;
+        if (cleanContractNumber) {
+            const existingNumber = await prisma_1.default.contract.findFirst({ where: { contractNumber: cleanContractNumber } });
+            if (existingNumber) {
+                return res.status(400).json({ error: `Nomor kontrak '${cleanContractNumber}' sudah terdaftar.` });
+            }
         }
         const start = new Date(startDate);
         const end = new Date(endDate);
@@ -148,12 +179,12 @@ router.post('/', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MANA
             initialStatus = 'AKAN_BERAKHIR';
         }
         if (contractType === 'PKWTT') {
-            initialStatus = 'DIANGKAT_TETAP';
+            initialStatus = 'AKTIF';
         }
         const contract = await prisma_1.default.contract.create({
             data: {
                 employeeId,
-                contractNumber,
+                contractNumber: cleanContractNumber,
                 contractType,
                 sequence: (await prisma_1.default.contract.count({ where: { employeeId } })) + 1,
                 startDate: start,
@@ -197,11 +228,38 @@ router.post('/:id/extend', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADM
         if (!oldContract) {
             return res.status(404).json({ error: 'Kontrak lama tidak ditemukan.' });
         }
+        // 1. Pastikan tindak lanjut hanya dilakukan pada kontrak terbaru karyawan
+        const newerContract = await prisma_1.default.contract.findFirst({
+            where: {
+                employeeId: oldContract.employeeId,
+                sequence: { gt: oldContract.sequence },
+            },
+        });
+        if (newerContract) {
+            return res.status(400).json({
+                error: `Tindak lanjut hanya dapat diproses pada kontrak terbaru karyawan (Kontrak Ke-${newerContract.sequence}).`,
+            });
+        }
+        // 2. Pastikan form penilaian kontrak atas nama karyawan tersebut sudah ada
+        const evaluation = await prisma_1.default.contractEvaluation.findFirst({
+            where: {
+                OR: [
+                    { contractId: oldContract.id },
+                    { employeeId: oldContract.employeeId },
+                ],
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+        if (!evaluation) {
+            return res.status(400).json({
+                error: 'Tindak lanjut terkunci: Karyawan belum memiliki form penilaian kontrak. Harap lengkapi form penilaian terlebih dahulu.',
+            });
+        }
         if (actionType === 'ANGKAT_TETAP') {
             const updatedContract = await prisma_1.default.contract.update({
                 where: { id },
                 data: {
-                    status: 'DIANGKAT_TETAP',
+                    status: 'AKTIF',
                     contractType: 'PKWTT',
                     notes: notes ? `${oldContract.notes || ''} | Diangkat Tetap: ${notes}` : oldContract.notes,
                 },
@@ -216,24 +274,48 @@ router.post('/:id/extend', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADM
                     contractId: oldContract.id,
                     changeType: 'CONVERT_TO_PERMANENT',
                     previousData: JSON.stringify({ status: oldContract.status, type: oldContract.contractType }),
-                    newData: JSON.stringify({ status: 'DIANGKAT_TETAP', type: 'PKWTT' }),
+                    newData: JSON.stringify({ status: 'AKTIF', type: 'PKWTT' }),
                     changedById: req.user?.id,
                 },
             });
             await (0, auditLogger_1.logAudit)(req.user?.id, 'CONVERT_PERMANENT', 'CONTRACT', `Converted ${oldContract.employee.name} to Permanent (PKWTT)`, req.ip || '');
             return res.json({ message: 'Status karyawan berhasil diubah menjadi Karyawan Tetap (PKWTT).', contract: updatedContract });
         }
-        if (!newContractNumber || !newStartDate || !newEndDate) {
-            return res.status(400).json({ error: 'Field wajib: Nomor Kontrak Baru, Tanggal Mulai Baru, Tanggal Berakhir Baru.' });
+        if (actionType === 'RESIGN' || actionType === 'SELESAI_KONTRAK') {
+            const updatedContract = await prisma_1.default.contract.update({
+                where: { id },
+                data: {
+                    status: 'RESIGN',
+                    notes: notes ? `${oldContract.notes || ''} | Resign/Selesai Kontrak: ${notes}` : `${oldContract.notes || ''} | Selesai Kontrak / Resign`,
+                },
+                include: { employee: true },
+            });
+            await prisma_1.default.contractHistory.create({
+                data: {
+                    contractId: oldContract.id,
+                    changeType: 'CONTRACT_TERMINATED',
+                    previousData: JSON.stringify({ status: oldContract.status }),
+                    newData: JSON.stringify({ status: 'RESIGN', reason: notes || 'Selesai Kontrak / Resign' }),
+                    changedById: req.user?.id,
+                },
+            });
+            await (0, auditLogger_1.logAudit)(req.user?.id, 'CONTRACT_RESIGN', 'CONTRACT', `Marked ${oldContract.employee.name} as Resign / Selesai Kontrak`, req.ip || '');
+            return res.json({ message: 'Kontrak karyawan berhasil diubah menjadi Selesai Kontrak / Resign.', contract: updatedContract });
         }
+        if (!newStartDate || !newEndDate) {
+            return res.status(400).json({ error: 'Field wajib: Tanggal Mulai Baru, Tanggal Berakhir Baru.' });
+        }
+        const dept = oldContract.employee?.department?.substring(0, 3).toUpperCase() || 'EMP';
+        const fallbackNo = `PKWT/${new Date().getFullYear()}/${dept}/${Math.floor(Math.random() * 900 + 100)}`;
+        const effectiveContractNumber = newContractNumber && String(newContractNumber).trim() !== '' ? String(newContractNumber).trim() : fallbackNo;
         await prisma_1.default.contract.update({
             where: { id },
-            data: { status: 'DIPERPANJANG' },
+            data: { status: 'AKTIF' },
         });
         const newContract = await prisma_1.default.contract.create({
             data: {
                 employeeId: oldContract.employeeId,
-                contractNumber: newContractNumber,
+                contractNumber: effectiveContractNumber,
                 contractType: newContractType || oldContract.contractType,
                 sequence: (await prisma_1.default.contract.count({ where: { employeeId: oldContract.employeeId } })) + 1,
                 startDate: new Date(newStartDate),
@@ -303,16 +385,31 @@ router.post('/:id/upload-document', auth_1.authenticateJWT, (0, auth_1.requireRo
 router.put('/:id', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MANAGEMENT']), async (req, res) => {
     try {
         const id = String(req.params.id);
-        const { contractType, startDate, endDate, status, notes, documentUrl, sequence } = req.body;
+        const { contractNumber, contractType, startDate, endDate, status, notes, documentUrl, sequence } = req.body;
         const existing = await prisma_1.default.contract.findUnique({ where: { id } });
         if (!existing) {
             return res.status(404).json({ error: 'Kontrak tidak ditemukan.' });
         }
         const newSequence = sequence !== undefined && Number(sequence) > 0 ? Number(sequence) : undefined;
+        const cleanContractNumber = contractNumber !== undefined
+            ? (contractNumber && String(contractNumber).trim() !== '' ? String(contractNumber).trim() : null)
+            : existing.contractNumber;
+        if (cleanContractNumber && cleanContractNumber !== existing.contractNumber) {
+            const duplicate = await prisma_1.default.contract.findFirst({
+                where: {
+                    contractNumber: cleanContractNumber,
+                    id: { not: id },
+                },
+            });
+            if (duplicate) {
+                return res.status(400).json({ error: `Nomor kontrak '${cleanContractNumber}' sudah digunakan pada kontrak lain.` });
+            }
+        }
         const updated = await prisma_1.default.$transaction(async (tx) => {
             const updatedContract = await tx.contract.update({
                 where: { id },
                 data: {
+                    contractNumber: cleanContractNumber,
                     contractType: contractType || existing.contractType,
                     startDate: startDate ? new Date(startDate) : existing.startDate,
                     endDate: endDate ? new Date(endDate) : existing.endDate,

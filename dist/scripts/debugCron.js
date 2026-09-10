@@ -22,7 +22,7 @@ async function main() {
     console.log('\n=== CONTRACTS (cron view) ===');
     const today = startOfToday();
     const contracts = await prisma_1.default.contract.findMany({
-        where: { status: { notIn: ['DIPERPANJANG', 'DIANGKAT_TETAP'] } },
+        where: { status: { notIn: ['DIPERPANJANG', 'RESIGN'] }, contractType: { not: 'PKWTT' } },
         include: { employee: { include: { user: true } } },
         orderBy: { endDate: 'asc' },
     });

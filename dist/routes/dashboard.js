@@ -24,24 +24,23 @@ router.get('/summary', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN',
         const expiringContracts = await prisma_1.default.contract.count({ where: { status: 'AKAN_BERAKHIR' } });
         const expiredContracts = await prisma_1.default.contract.count({ where: { status: 'EXPIRED' } });
         const extendedContracts = await prisma_1.default.contract.count({ where: { status: 'DIPERPANJANG' } });
-        // Overdue contracts (endDate < today and status is not DIPERPANJANG or DIANGKAT_TETAP)
+        const resignContracts = await prisma_1.default.contract.count({ where: { status: 'RESIGN' } });
+        // Overdue contracts (status is EXPIRED, excluding permanent PKWTT)
         const overdueContractsList = await prisma_1.default.contract.findMany({
             where: {
-                endDate: { lt: today },
-                status: { notIn: ['DIPERPANJANG', 'DIANGKAT_TETAP'] },
+                status: 'EXPIRED',
+                contractType: { not: 'PKWTT' },
             },
             include: {
                 employee: true,
             },
             orderBy: { endDate: 'asc' },
         });
-        // Upcoming expiring contracts in 30 days
-        const in30Days = new Date(today);
-        in30Days.setDate(today.getDate() + 30);
+        // Upcoming expiring contracts in 30 days (status is AKAN_BERAKHIR, excluding permanent PKWTT)
         const expiring30DaysList = await prisma_1.default.contract.findMany({
             where: {
-                endDate: { gte: today, lte: in30Days },
-                status: { notIn: ['DIPERPANJANG', 'DIANGKAT_TETAP'] },
+                status: 'AKAN_BERAKHIR',
+                contractType: { not: 'PKWTT' },
             },
             include: {
                 employee: true,
@@ -60,6 +59,7 @@ router.get('/summary', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN',
                 akanBerakhir: expiringContracts,
                 expired: expiredContracts,
                 diperpanjang: extendedContracts,
+                resign: resignContracts,
             },
             overdueCount: overdueContractsList.length,
             overdueList: overdueContractsList,
@@ -82,7 +82,8 @@ router.get('/expiring-contracts', auth_1.authenticateJWT, (0, auth_1.requireRole
         const contracts = await prisma_1.default.contract.findMany({
             where: {
                 endDate: { gte: today, lte: futureDate },
-                status: { notIn: ['DIPERPANJANG', 'DIANGKAT_TETAP'] },
+                status: { in: ['AKTIF', 'AKAN_BERAKHIR'] },
+                contractType: { not: 'PKWTT' },
             },
             include: {
                 employee: true,

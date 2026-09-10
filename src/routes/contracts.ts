@@ -12,7 +12,7 @@ const router = Router();
 // GET /api/contracts
 router.get('/', authenticateJWT, async (req: AuthRequest, res: Response) => {
   try {
-    const { status, contractType, search } = req.query;
+    const { status, contractType, search, dateType, dateFrom, dateTo, sortBy, sortOrder } = req.query;
 
     const whereClause: Prisma.ContractWhereInput = {};
 
@@ -35,6 +35,31 @@ router.get('/', authenticateJWT, async (req: AuthRequest, res: Response) => {
           { employee: { nik: { contains: String(search), mode: 'insensitive' } } },
         ];
       }
+      if (dateFrom || dateTo) {
+        const field = dateType === 'startDate' ? 'startDate' : 'endDate';
+        const dateFilter: Prisma.DateTimeFilter = {};
+        if (dateFrom) {
+          dateFilter.gte = new Date(String(dateFrom) + 'T00:00:00.000Z');
+        }
+        if (dateTo) {
+          dateFilter.lte = new Date(String(dateTo) + 'T23:59:59.999Z');
+        }
+        whereClause[field] = dateFilter;
+      }
+    }
+
+    const orderDir: Prisma.SortOrder = sortOrder === 'desc' ? 'desc' : 'asc';
+    let orderByClause: Prisma.ContractOrderByWithRelationInput = { endDate: orderDir };
+    if (sortBy === 'startDate') {
+      orderByClause = { startDate: orderDir };
+    } else if (sortBy === 'contractNumber') {
+      orderByClause = { contractNumber: orderDir };
+    } else if (sortBy === 'sequence') {
+      orderByClause = { sequence: orderDir };
+    } else if (sortBy === 'employeeName') {
+      orderByClause = { employee: { name: orderDir } };
+    } else if (sortBy === 'status') {
+      orderByClause = { status: orderDir };
     }
 
     const contracts = await prisma.contract.findMany({
@@ -45,7 +70,7 @@ router.get('/', authenticateJWT, async (req: AuthRequest, res: Response) => {
           select: { id: true, name: true, email: true },
         },
       },
-      orderBy: { endDate: 'asc' },
+      orderBy: orderByClause,
     });
 
     return res.json({ contracts, total: contracts.length });
@@ -141,13 +166,17 @@ router.post('/', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (r
   try {
     const { employeeId, contractNumber, contractType, startDate, endDate, notes, documentUrl } = req.body;
 
-    if (!employeeId || !contractNumber || !contractType || !startDate || !endDate) {
-      return res.status(400).json({ error: 'Field wajib: Karyawan, No Kontrak, Jenis Kontrak, Tanggal Mulai, Tanggal Berakhir.' });
+    if (!employeeId || !contractType || !startDate || !endDate) {
+      return res.status(400).json({ error: 'Field wajib: Karyawan, Jenis Kontrak, Tanggal Mulai, Tanggal Berakhir.' });
     }
 
-    const existingNumber = await prisma.contract.findUnique({ where: { contractNumber } });
-    if (existingNumber) {
-      return res.status(400).json({ error: `Nomor kontrak '${contractNumber}' sudah terdaftar.` });
+    const cleanContractNumber = contractNumber && String(contractNumber).trim() !== '' ? String(contractNumber).trim() : null;
+
+    if (cleanContractNumber) {
+      const existingNumber = await prisma.contract.findFirst({ where: { contractNumber: cleanContractNumber } });
+      if (existingNumber) {
+        return res.status(400).json({ error: `Nomor kontrak '${cleanContractNumber}' sudah terdaftar.` });
+      }
     }
 
     const start = new Date(startDate);
@@ -164,13 +193,13 @@ router.post('/', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (r
     }
 
     if (contractType === 'PKWTT') {
-      initialStatus = 'DIANGKAT_TETAP';
+      initialStatus = 'AKTIF';
     }
 
     const contract = await prisma.contract.create({
       data: {
         employeeId,
-        contractNumber,
+        contractNumber: cleanContractNumber,
         contractType,
         sequence: (await prisma.contract.count({ where: { employeeId } })) + 1,
         startDate: start,
@@ -221,11 +250,42 @@ router.post('/:id/extend', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT'])
       return res.status(404).json({ error: 'Kontrak lama tidak ditemukan.' });
     }
 
+    // 1. Pastikan tindak lanjut hanya dilakukan pada kontrak terbaru karyawan
+    const newerContract = await prisma.contract.findFirst({
+      where: {
+        employeeId: oldContract.employeeId,
+        sequence: { gt: oldContract.sequence },
+      },
+    });
+
+    if (newerContract) {
+      return res.status(400).json({
+        error: `Tindak lanjut hanya dapat diproses pada kontrak terbaru karyawan (Kontrak Ke-${newerContract.sequence}).`,
+      });
+    }
+
+    // 2. Pastikan form penilaian kontrak atas nama karyawan tersebut sudah ada
+    const evaluation = await prisma.contractEvaluation.findFirst({
+      where: {
+        OR: [
+          { contractId: oldContract.id },
+          { employeeId: oldContract.employeeId },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!evaluation) {
+      return res.status(400).json({
+        error: 'Tindak lanjut terkunci: Karyawan belum memiliki form penilaian kontrak. Harap lengkapi form penilaian terlebih dahulu.',
+      });
+    }
+
     if (actionType === 'ANGKAT_TETAP') {
       const updatedContract = await prisma.contract.update({
         where: { id },
         data: {
-          status: 'DIANGKAT_TETAP',
+          status: 'AKTIF',
           contractType: 'PKWTT',
           notes: notes ? `${oldContract.notes || ''} | Diangkat Tetap: ${notes}` : oldContract.notes,
         },
@@ -242,7 +302,7 @@ router.post('/:id/extend', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT'])
           contractId: oldContract.id,
           changeType: 'CONVERT_TO_PERMANENT',
           previousData: JSON.stringify({ status: oldContract.status, type: oldContract.contractType }),
-          newData: JSON.stringify({ status: 'DIANGKAT_TETAP', type: 'PKWTT' }),
+          newData: JSON.stringify({ status: 'AKTIF', type: 'PKWTT' }),
           changedById: req.user?.id,
         },
       });
@@ -252,19 +312,48 @@ router.post('/:id/extend', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT'])
       return res.json({ message: 'Status karyawan berhasil diubah menjadi Karyawan Tetap (PKWTT).', contract: updatedContract });
     }
 
-    if (!newContractNumber || !newStartDate || !newEndDate) {
-      return res.status(400).json({ error: 'Field wajib: Nomor Kontrak Baru, Tanggal Mulai Baru, Tanggal Berakhir Baru.' });
+    if (actionType === 'RESIGN' || actionType === 'SELESAI_KONTRAK') {
+      const updatedContract = await prisma.contract.update({
+        where: { id },
+        data: {
+          status: 'RESIGN',
+          notes: notes ? `${oldContract.notes || ''} | Resign/Selesai Kontrak: ${notes}` : `${oldContract.notes || ''} | Selesai Kontrak / Resign`,
+        },
+        include: { employee: true },
+      });
+
+      await prisma.contractHistory.create({
+        data: {
+          contractId: oldContract.id,
+          changeType: 'CONTRACT_TERMINATED',
+          previousData: JSON.stringify({ status: oldContract.status }),
+          newData: JSON.stringify({ status: 'RESIGN', reason: notes || 'Selesai Kontrak / Resign' }),
+          changedById: req.user?.id,
+        },
+      });
+
+      await logAudit(req.user?.id, 'CONTRACT_RESIGN', 'CONTRACT', `Marked ${oldContract.employee.name} as Resign / Selesai Kontrak`, req.ip || '');
+
+      return res.json({ message: 'Kontrak karyawan berhasil diubah menjadi Selesai Kontrak / Resign.', contract: updatedContract });
     }
+
+    if (!newStartDate || !newEndDate) {
+      return res.status(400).json({ error: 'Field wajib: Tanggal Mulai Baru, Tanggal Berakhir Baru.' });
+    }
+
+    const dept = oldContract.employee?.department?.substring(0, 3).toUpperCase() || 'EMP';
+    const fallbackNo = `PKWT/${new Date().getFullYear()}/${dept}/${Math.floor(Math.random() * 900 + 100)}`;
+    const effectiveContractNumber = newContractNumber && String(newContractNumber).trim() !== '' ? String(newContractNumber).trim() : fallbackNo;
 
     await prisma.contract.update({
       where: { id },
-      data: { status: 'DIPERPANJANG' },
+      data: { status: 'AKTIF' },
     });
 
     const newContract = await prisma.contract.create({
       data: {
         employeeId: oldContract.employeeId,
-        contractNumber: newContractNumber,
+        contractNumber: effectiveContractNumber,
         contractType: newContractType || oldContract.contractType,
         sequence: (await prisma.contract.count({ where: { employeeId: oldContract.employeeId } })) + 1,
         startDate: new Date(newStartDate),
@@ -350,7 +439,7 @@ router.post(
 router.put('/:id', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
-    const { contractType, startDate, endDate, status, notes, documentUrl, sequence } = req.body;
+    const { contractNumber, contractType, startDate, endDate, status, notes, documentUrl, sequence } = req.body;
 
     const existing = await prisma.contract.findUnique({ where: { id } });
     if (!existing) {
@@ -358,11 +447,27 @@ router.put('/:id', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async 
     }
 
     const newSequence = sequence !== undefined && Number(sequence) > 0 ? Number(sequence) : undefined;
+    const cleanContractNumber = contractNumber !== undefined
+      ? (contractNumber && String(contractNumber).trim() !== '' ? String(contractNumber).trim() : null)
+      : existing.contractNumber;
+
+    if (cleanContractNumber && cleanContractNumber !== existing.contractNumber) {
+      const duplicate = await prisma.contract.findFirst({
+        where: {
+          contractNumber: cleanContractNumber,
+          id: { not: id },
+        },
+      });
+      if (duplicate) {
+        return res.status(400).json({ error: `Nomor kontrak '${cleanContractNumber}' sudah digunakan pada kontrak lain.` });
+      }
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
       const updatedContract = await tx.contract.update({
         where: { id },
         data: {
+          contractNumber: cleanContractNumber,
           contractType: contractType || existing.contractType,
           startDate: startDate ? new Date(startDate) : existing.startDate,
           endDate: endDate ? new Date(endDate) : existing.endDate,

@@ -11,6 +11,7 @@ import userRoutes from './routes/users';
 import departmentRoutes from './routes/departments';
 import positionRoutes from './routes/positions';
 import auditLogRoutes from './routes/auditLogs';
+import evaluationRoutes from './routes/evaluations';
 import { initCronJobs, runContractExpirationCheck } from './services/cronService';
 import { getEmailTemplatesDir } from './services/emailTemplate';
 import { uploadDirPath } from './utils/upload';
@@ -46,6 +47,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/positions', positionRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
+app.use('/api/evaluations', evaluationRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

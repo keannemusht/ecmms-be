@@ -8,6 +8,7 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const prisma_1 = __importDefault(require("../prisma"));
 const auth_1 = require("../middleware/auth");
 const auditLogger_1 = require("../utils/auditLogger");
+const cronService_1 = require("../services/cronService");
 const router = (0, express_1.Router)();
 const ROLES = ['ADMIN'];
 function isRequesterAdmin(req) {
@@ -62,6 +63,9 @@ router.post('/', auth_1.authenticateJWT, (0, auth_1.requireRole)(ROLES), async (
                 isActive: true,
             },
         });
+        if (user.role === 'ADMIN' || user.role === 'MANAGEMENT') {
+            await (0, cronService_1.syncSystemNotificationsForUser)(user.id, user.role);
+        }
         await (0, auditLogger_1.logAudit)(req.user?.id, 'CREATE_USER', 'USER', `Created user account ${user.email} (${user.role})`, req.ip || '');
         return res.status(201).json({
             message: 'User berhasil dibuat.',

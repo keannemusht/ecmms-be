@@ -59,6 +59,10 @@ router.post('/in-app/:id/send-whatsapp', auth_1.authenticateJWT, (0, auth_1.requ
 router.get('/in-app', auth_1.authenticateJWT, async (req, res) => {
     try {
         const userId = req.user?.id;
+        const userRole = req.user?.role;
+        if (userId && (userRole === 'ADMIN' || userRole === 'MANAGEMENT')) {
+            await (0, cronService_1.syncSystemNotificationsForUser)(userId, userRole);
+        }
         const pageNum = Math.max(1, parseInt(String(req.query.page), 10) || 1);
         const limitNum = Math.min(100, Math.max(1, parseInt(String(req.query.limit), 10) || 10));
         const category = String(req.query.category || 'all');

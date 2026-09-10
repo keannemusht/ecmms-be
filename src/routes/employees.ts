@@ -3,7 +3,7 @@ import prisma from '../prisma';
 import { authenticateJWT, AuthRequest, requireRole } from '../middleware/auth';
 import { logAudit } from '../utils/auditLogger';
 import { buildWhatsAppLink } from '../services/whatsappNotification';
-import { Prisma, EmploymentType } from '@prisma/client';
+import { Prisma, EmploymentType, ContractStatus } from '@prisma/client';
 import { normalizeEmployeeContractStatuses } from '../services/contractNormalizer';
 
 const router = Router();
@@ -165,10 +165,10 @@ router.post('/:id/send-whatsapp', authenticateJWT, requireRole(['ADMIN', 'MANAGE
 // POST /api/employees
 router.post('/', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (req: AuthRequest, res: Response) => {
   try {
-    const { nik, name, email, phone, department, position, employmentType, joinDate } = req.body;
+    const { nik, name, email, phone, department, position, level, employmentType, joinDate } = req.body;
 
-    if (!nik || !name || !email || !department || !position || !employmentType || !joinDate) {
-      return res.status(400).json({ error: 'Field wajib: NIK, Nama, Email, Departemen, Jabatan, Jenis Hubungan Kerja, dan Tanggal Join.' });
+    if (!nik || !name || !department || !position || !employmentType || !joinDate) {
+      return res.status(400).json({ error: 'Field wajib: NIK, Nama, Departemen, Jabatan, Jenis Hubungan Kerja, dan Tanggal Join.' });
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(joinDate)) || isNaN(new Date(joinDate).getTime())) {
@@ -180,19 +180,34 @@ router.post('/', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (r
       return res.status(400).json({ error: `Karyawan dengan NIK '${nik}' sudah terdaftar.` });
     }
 
-    const existingEmail = await prisma.employee.findUnique({ where: { email } });
-    if (existingEmail) {
-      return res.status(400).json({ error: `Karyawan dengan Email '${email}' sudah terdaftar.` });
+    const cleanEmail = email && String(email).trim() !== '' ? String(email).trim() : null;
+    const cleanPhone = phone && String(phone).trim() !== '' ? String(phone).trim() : null;
+
+    if (cleanEmail) {
+      const existingEmail = await prisma.employee.findUnique({ where: { email: cleanEmail } });
+      if (existingEmail) {
+        return res.status(400).json({ error: `Karyawan dengan Email '${cleanEmail}' sudah terdaftar.` });
+      }
+    }
+
+    // Auto-upsert position master
+    if (position) {
+      await prisma.position.upsert({
+        where: { name: String(position).trim() },
+        update: {},
+        create: { name: String(position).trim() },
+      }).catch(() => {});
     }
 
     const employee = await prisma.employee.create({
       data: {
         nik,
         name,
-        email,
-        phone: phone || null,
+        email: cleanEmail,
+        phone: cleanPhone,
         department,
         position,
+        level: level || 'Staff',
         employmentType,
         joinDate: new Date(joinDate),
       },
@@ -211,21 +226,45 @@ router.post('/', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (r
 router.put('/:id', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
-    const { name, email, phone, department, position, employmentType, joinDate } = req.body;
+    const { name, email, phone, department, position, level, employmentType, joinDate } = req.body;
 
     const existing = await prisma.employee.findUnique({ where: { id } });
     if (!existing) {
       return res.status(404).json({ error: 'Karyawan tidak ditemukan.' });
     }
 
+    const cleanEmail = email !== undefined
+      ? (email && String(email).trim() !== '' ? String(email).trim() : null)
+      : existing.email;
+    const cleanPhone = phone !== undefined
+      ? (phone && String(phone).trim() !== '' ? String(phone).trim() : null)
+      : existing.phone;
+
+    if (cleanEmail && cleanEmail !== existing.email) {
+      const existingEmail = await prisma.employee.findUnique({ where: { email: cleanEmail } });
+      if (existingEmail) {
+        return res.status(400).json({ error: `Karyawan dengan Email '${cleanEmail}' sudah terdaftar.` });
+      }
+    }
+
+    // Auto-upsert position master
+    if (position) {
+      await prisma.position.upsert({
+        where: { name: String(position).trim() },
+        update: {},
+        create: { name: String(position).trim() },
+      }).catch(() => {});
+    }
+
     const updated = await prisma.employee.update({
       where: { id },
       data: {
         name: name || existing.name,
-        email: email || existing.email,
-        phone: phone !== undefined ? phone : existing.phone,
+        email: cleanEmail,
+        phone: cleanPhone,
         department: department || existing.department,
         position: position || existing.position,
+        level: level !== undefined ? level : existing.level,
         employmentType: employmentType || existing.employmentType,
         joinDate: joinDate ? new Date(joinDate) : existing.joinDate,
       },
@@ -270,126 +309,203 @@ router.post('/bulk-import', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']
     let successCount = 0;
     let failedCount = 0;
     const errors: string[] = [];
-    const perNikNextSequence = new Map<string, number>();
+
+    // Group incoming rows by NIK so multiple rows for the same employee form contract sequence 1, 2, 3...
+    const empMap = new Map<string, {
+      nik: string;
+      name: string;
+      email: string | null;
+      phone: string | null;
+      department: string;
+      position: string;
+      level?: string | null;
+      employmentType: EmploymentType;
+      joinDate: Date;
+      contracts: Array<{
+        contractNumber: string | null;
+        startDate: Date;
+        endDate: Date;
+        statusStr: string;
+        contractType: EmploymentType;
+      }>;
+    }>();
+
+    const isoPattern = /^\d{4}-\d{2}-\d{2}$/;
 
     for (const emp of employees) {
+      if (!emp.nik || !emp.name || !emp.department || !emp.position || !emp.employmentType || !emp.joinDate) {
+        failedCount++;
+        errors.push(`Baris dengan NIK ${emp.nik || 'N/A'}: Data tidak lengkap (wajib: NIK, Nama, Departemen, Jabatan, Jenis, Tanggal Join).`);
+        continue;
+      }
+
+      const joinDate = new Date(emp.joinDate);
+      if (isNaN(joinDate.getTime()) || !isoPattern.test(String(emp.joinDate))) {
+        failedCount++;
+        errors.push(`Baris dengan NIK ${emp.nik}: JoinDate '${emp.joinDate}' tidak valid. Gunakan format YYYY-MM-DD.`);
+        continue;
+      }
+
+      const nik = String(emp.nik).trim();
+      const cleanEmail = emp.email && String(emp.email).trim() !== '' ? String(emp.email).trim() : null;
+      const cleanPhone = emp.phone && String(emp.phone).trim() !== '' ? String(emp.phone).trim() : null;
+      const department = String(emp.department).trim();
+      const position = String(emp.position).trim();
+      const level = emp.level ? String(emp.level).trim() : 'Staff';
+      const employmentType = (emp.employmentType || 'PKWT') as EmploymentType;
+
+      if (!empMap.has(nik)) {
+        empMap.set(nik, {
+          nik,
+          name: String(emp.name).trim(),
+          email: cleanEmail,
+          phone: cleanPhone,
+          department,
+          position,
+          level,
+          employmentType,
+          joinDate,
+          contracts: [],
+        });
+      }
+
+      const currentEmp = empMap.get(nik)!;
+      if (!currentEmp.email && cleanEmail) currentEmp.email = cleanEmail;
+      if (!currentEmp.phone && cleanPhone) currentEmp.phone = cleanPhone;
+
+      if (emp.contractStartDate && emp.contractEndDate) {
+        const sDate = new Date(emp.contractStartDate);
+        const eDate = new Date(emp.contractEndDate);
+        if (!isNaN(sDate.getTime()) && !isNaN(eDate.getTime())) {
+          const rawContractNo = emp.contractNumber && String(emp.contractNumber).trim() !== '' ? String(emp.contractNumber).trim() : null;
+          currentEmp.contracts.push({
+            contractNumber: rawContractNo,
+            startDate: sDate,
+            endDate: eDate,
+            statusStr: String(emp.contractNotes || emp.status || ''),
+            contractType: (emp.contractType || employmentType) as EmploymentType,
+          });
+        }
+      }
+    }
+
+    // Sync departments
+    const uniqueDepts = Array.from(new Set(Array.from(empMap.values()).map((e) => e.department).filter(Boolean)));
+    for (const d of uniqueDepts) {
+      await prisma.department.upsert({
+        where: { name: d },
+        update: {},
+        create: { name: d },
+      }).catch(() => {});
+    }
+
+    // Sync positions
+    const uniquePositions = Array.from(new Set(Array.from(empMap.values()).map((e) => e.position).filter(Boolean)));
+    for (const p of uniquePositions) {
+      await prisma.position.upsert({
+        where: { name: p },
+        update: {},
+        create: { name: p },
+      }).catch(() => {});
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (const [, empData] of empMap.entries()) {
       try {
-        if (!emp.nik || !emp.name || !emp.email || !emp.department || !emp.position || !emp.employmentType || !emp.joinDate) {
-          failedCount++;
-          errors.push(`Baris dengan NIK ${emp.nik || 'N/A'}: Data tidak lengkap.`);
-          continue;
-        }
-
-        const joinDate = new Date(emp.joinDate);
-        const isoPattern = /^\d{4}-\d{2}-\d{2}$/;
-        if (isNaN(joinDate.getTime()) || !isoPattern.test(String(emp.joinDate))) {
-          failedCount++;
-          errors.push(`Baris dengan NIK ${emp.nik}: JoinDate '${emp.joinDate}' tidak valid. Gunakan format YYYY-MM-DD.`);
-          continue;
-        }
-
         const employee = await prisma.employee.upsert({
-          where: { nik: emp.nik },
+          where: { nik: empData.nik },
           update: {
-            name: emp.name,
-            email: emp.email,
-            phone: emp.phone || null,
-            department: emp.department,
-            position: emp.position,
-            employmentType: emp.employmentType,
-            joinDate,
+            name: empData.name,
+            ...(empData.email ? { email: empData.email } : {}),
+            phone: empData.phone,
+            department: empData.department,
+            position: empData.position,
+            level: empData.level,
+            employmentType: empData.employmentType,
+            joinDate: empData.joinDate,
           },
           create: {
-            nik: emp.nik,
-            name: emp.name,
-            email: emp.email,
-            phone: emp.phone || null,
-            department: emp.department,
-            position: emp.position,
-            employmentType: emp.employmentType,
-            joinDate,
+            nik: empData.nik,
+            name: empData.name,
+            email: empData.email,
+            phone: empData.phone,
+            department: empData.department,
+            position: empData.position,
+            level: empData.level,
+            employmentType: empData.employmentType,
+            joinDate: empData.joinDate,
           },
         });
 
-        // Optional contract history columns: No Kontrak, Tgl Mulai, Tgl Berakhir, Jenis Kontrak.
-        // Repeating the same NIK on multiple rows records the 1st, 2nd, 3rd ... contract.
-        if (emp.contractNumber) {
-          const startDate = new Date(emp.contractStartDate);
-          const endDate = new Date(emp.contractEndDate);
-          if (
-            isNaN(startDate.getTime()) ||
-            isNaN(endDate.getTime()) ||
-            !isoPattern.test(String(emp.contractStartDate)) ||
-            !isoPattern.test(String(emp.contractEndDate))
-          ) {
-            failedCount++;
-            errors.push(`Baris dengan NIK ${emp.nik} (kontrak ${emp.contractNumber}): Tanggal kontrak tidak valid. Gunakan format YYYY-MM-DD.`);
-            continue;
+        // Record all contracts (sorted by startDate ascending)
+        if (empData.contracts.length > 0) {
+          empData.contracts.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+
+          // Clean existing contracts if re-importing this employee to keep clean 1..N order
+          await prisma.contract.deleteMany({ where: { employeeId: employee.id } });
+
+          const total = empData.contracts.length;
+          for (let i = 0; i < total; i++) {
+            const c = empData.contracts[i];
+            const seq = i + 1;
+            const isLatest = i === total - 1;
+            const diffDays = Math.ceil((c.endDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+            const isResign = c.statusStr.toLowerCase().includes('resign') ||
+                             c.statusStr.toLowerCase().includes('exit') ||
+                             c.statusStr.toLowerCase().includes('keluar');
+
+            let status: ContractStatus = 'DIPERPANJANG';
+            if (isResign) {
+              status = 'RESIGN';
+            } else if (isLatest) {
+              if (c.contractType === 'PKWTT' || empData.employmentType === 'PKWTT') {
+                status = 'AKTIF';
+              } else if (diffDays <= 0) {
+                status = 'EXPIRED';
+              } else if (diffDays <= 30) {
+                status = 'AKAN_BERAKHIR';
+              } else {
+                status = 'AKTIF';
+              }
+            }
+
+            const notes = isResign
+              ? `Resign${c.statusStr ? ` - ${c.statusStr}` : ''}`
+              : (c.statusStr ? c.statusStr : `Kontrak Ke-${seq}`);
+
+            await prisma.contract.create({
+              data: {
+                employeeId: employee.id,
+                contractNumber: c.contractNumber,
+                contractType: c.contractType,
+                sequence: seq,
+                startDate: c.startDate,
+                endDate: c.endDate,
+                status,
+                notes,
+                createdById: req.user?.id || null,
+              },
+            });
           }
-
-          let nextSeq = perNikNextSequence.get(emp.nik);
-          if (nextSeq === undefined) {
-            const existingCount = await prisma.contract.count({ where: { employeeId: employee.id } });
-            nextSeq = existingCount;
-            perNikNextSequence.set(emp.nik, nextSeq);
-          }
-          nextSeq += 1;
-          perNikNextSequence.set(emp.nik, nextSeq);
-
-          const today = new Date();
-          const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
-          const contractType = (emp.contractType || emp.employmentType) as EmploymentType;
-
-          let status: 'AKTIF' | 'AKAN_BERAKHIR' | 'EXPIRED' | 'DIANGKAT_TETAP' = 'AKTIF';
-          if (diffDays <= 0) {
-            status = 'EXPIRED';
-          } else if (diffDays <= 30) {
-            status = 'AKAN_BERAKHIR';
-          }
-          if (contractType === 'PKWTT') {
-            status = 'DIANGKAT_TETAP';
-          }
-
-          const createdContract = await prisma.contract.create({
-            data: {
-              employeeId: employee.id,
-              contractNumber: String(emp.contractNumber),
-              contractType,
-              sequence: nextSeq,
-              startDate,
-              endDate,
-              status,
-              createdById: req.user?.id || null,
-              notes: `Import massal${emp.contractNotes ? `: ${emp.contractNotes}` : ''}`,
-            },
-          });
-
-          // This contract is the successor of any earlier contract for this employee,
-          // so previously EXPIRED contracts (including earlier rows of this same
-          // import) become historical DIPERPANJANG instead of showing under "Expired".
-          // The just-created contract is excluded: if it is the employee's latest and
-          // ended, it correctly stays EXPIRED.
-          await prisma.contract.updateMany({
-            where: { employeeId: employee.id, status: 'EXPIRED', id: { not: createdContract.id } },
-            data: { status: 'DIPERPANJANG' },
-          });
         }
 
         successCount++;
       } catch (err: unknown) {
         failedCount++;
         const errorMessage = err instanceof Error ? err.message : String(err);
-        errors.push(`Error NIK ${emp.nik}: ${errorMessage}`);
+        errors.push(`Error NIK ${empData.nik}: ${errorMessage}`);
       }
     }
 
-    // Normalize contract statuses across all employees after bulk import completes
+    // Normalize contract statuses across all employees
     await normalizeEmployeeContractStatuses();
 
     await logAudit(req.user?.id, 'BULK_IMPORT', 'EMPLOYEE', `Imported ${successCount} employees (${failedCount} failed)`, req.ip || '');
 
     return res.json({
-      message: `Proses import selesai. Berhasil: ${successCount}, Gagal: ${failedCount}`,
+      message: `Proses import selesai. Berhasil: ${successCount} karyawan, Gagal: ${failedCount}`,
       successCount,
       failedCount,
       errors,

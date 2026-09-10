@@ -24,12 +24,13 @@ router.get('/summary', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), as
     const expiringContracts = await prisma.contract.count({ where: { status: 'AKAN_BERAKHIR' } });
     const expiredContracts = await prisma.contract.count({ where: { status: 'EXPIRED' } });
     const extendedContracts = await prisma.contract.count({ where: { status: 'DIPERPANJANG' } });
+    const resignContracts = await prisma.contract.count({ where: { status: 'RESIGN' } });
 
-    // Overdue contracts (endDate < today and status is not DIPERPANJANG or DIANGKAT_TETAP)
+    // Overdue contracts (status is EXPIRED, excluding permanent PKWTT)
     const overdueContractsList = await prisma.contract.findMany({
       where: {
-        endDate: { lt: today },
-        status: { notIn: ['DIPERPANJANG', 'DIANGKAT_TETAP'] },
+        status: 'EXPIRED',
+        contractType: { not: 'PKWTT' },
       },
       include: {
         employee: true,
@@ -37,14 +38,11 @@ router.get('/summary', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), as
       orderBy: { endDate: 'asc' },
     });
 
-    // Upcoming expiring contracts in 30 days
-    const in30Days = new Date(today);
-    in30Days.setDate(today.getDate() + 30);
-
+    // Upcoming expiring contracts in 30 days (status is AKAN_BERAKHIR, excluding permanent PKWTT)
     const expiring30DaysList = await prisma.contract.findMany({
       where: {
-        endDate: { gte: today, lte: in30Days },
-        status: { notIn: ['DIPERPANJANG', 'DIANGKAT_TETAP'] },
+        status: 'AKAN_BERAKHIR',
+        contractType: { not: 'PKWTT' },
       },
       include: {
         employee: true,
@@ -64,6 +62,7 @@ router.get('/summary', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), as
         akanBerakhir: expiringContracts,
         expired: expiredContracts,
         diperpanjang: extendedContracts,
+        resign: resignContracts,
       },
       overdueCount: overdueContractsList.length,
       overdueList: overdueContractsList,
@@ -87,7 +86,8 @@ router.get('/expiring-contracts', authenticateJWT, requireRole(['ADMIN', 'MANAGE
     const contracts = await prisma.contract.findMany({
       where: {
         endDate: { gte: today, lte: futureDate },
-        status: { notIn: ['DIPERPANJANG', 'DIANGKAT_TETAP'] },
+        status: { in: ['AKTIF', 'AKAN_BERAKHIR'] },
+        contractType: { not: 'PKWTT' },
       },
       include: {
         employee: true,

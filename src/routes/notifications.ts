@@ -3,7 +3,7 @@ import prisma from '../prisma';
 import { authenticateJWT, AuthRequest, requireRole } from '../middleware/auth';
 import { logAudit } from '../utils/auditLogger';
 import { buildWhatsAppLink } from '../services/whatsappNotification';
-import { runContractExpirationCheck } from '../services/cronService';
+import { runContractExpirationCheck, syncSystemNotificationsForUser } from '../services/cronService';
 import { Prisma } from '@prisma/client';
 
 const router = Router();
@@ -66,6 +66,10 @@ router.post('/in-app/:id/send-whatsapp', authenticateJWT, requireRole(['ADMIN', 
 router.get('/in-app', authenticateJWT, async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
+    const userRole = req.user?.role;
+    if (userId && (userRole === 'ADMIN' || userRole === 'MANAGEMENT')) {
+      await syncSystemNotificationsForUser(userId, userRole);
+    }
     const pageNum = Math.max(1, parseInt(String(req.query.page), 10) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(String(req.query.limit), 10) || 10));
     const category = String(req.query.category || 'all');

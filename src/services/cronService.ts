@@ -86,8 +86,17 @@ async function resolveRecipients(targetRole: Role, employee: any): Promise<Recip
     return { userIds, emails: email ? [email] : [], phones };
   }
 
+  // When targetRole is MANAGEMENT or ADMIN, include both roles so all overseers are notified
+  const rolesToQuery: Role[] =
+    targetRole === 'MANAGEMENT' || targetRole === 'ADMIN'
+      ? ['MANAGEMENT', 'ADMIN']
+      : [targetRole];
+
   const users = await prisma.user.findMany({
-    where: { role: { in: ['ADMIN', 'MANAGEMENT'] } },
+    where: {
+      role: { in: rolesToQuery },
+      isActive: true,
+    },
     include: { employee: true },
   });
 
@@ -96,6 +105,63 @@ async function resolveRecipients(targetRole: Role, employee: any): Promise<Recip
     emails: [...new Set(users.map((u) => u.email).filter((e): e is string => Boolean(e)))],
     phones: [...new Set(users.map((u) => u.employee?.phone).filter((p): p is string => Boolean(p)))],
   };
+}
+
+/**
+ * Synchronizes system notifications (contract alerts, escalations) for an ADMIN or MANAGEMENT user
+ * so that new or existing management users always have access to the system alerts.
+ */
+export async function syncSystemNotificationsForUser(targetUserId: string, role: string) {
+  if (role !== 'ADMIN' && role !== 'MANAGEMENT') return;
+
+  try {
+    const sourceUser = await prisma.user.findFirst({
+      where: {
+        id: { not: targetUserId },
+        role: { in: ['ADMIN', 'MANAGEMENT'] },
+        notifications: { some: {} },
+      },
+      select: { id: true },
+    });
+
+    if (!sourceUser) return;
+
+    const existingNotifs = await prisma.inAppNotification.findMany({
+      where: { userId: targetUserId },
+      select: { title: true, message: true, contractId: true },
+    });
+
+    const existingKeys = new Set(
+      existingNotifs.map((n) => `${n.title}|${n.message}|${n.contractId || ''}`)
+    );
+
+    const sourceNotifs = await prisma.inAppNotification.findMany({
+      where: { userId: sourceUser.id },
+    });
+
+    const toCreate = sourceNotifs
+      .filter((n) => !existingKeys.has(`${n.title}|${n.message}|${n.contractId || ''}`))
+      .map((n) => ({
+        userId: targetUserId,
+        title: n.title,
+        message: n.message,
+        link: n.link,
+        contractId: n.contractId,
+        whatsappPhone: n.whatsappPhone,
+        whatsappMessage: n.whatsappMessage,
+        isRead: false,
+        createdAt: n.createdAt,
+      }));
+
+    if (toCreate.length > 0) {
+      await prisma.inAppNotification.createMany({
+        data: toCreate,
+      });
+      console.log(`[Notification Sync] Synced ${toCreate.length} notifications to user ${targetUserId} (${role})`);
+    }
+  } catch (err) {
+    console.error('[Notification Sync] Failed to sync notifications for user:', err);
+  }
 }
 
 async function sendInApp(userIds: string[], title: string, message: string, link = '/contracts') {
@@ -333,10 +399,11 @@ export async function runContractExpirationCheck(): Promise<CronRunSummary> {
       where: { isActive: true },
     });
 
-    // 2. Fetch non-permanent contracts that are not yet extended
+    // 2. Fetch non-permanent contracts that are not yet extended or resigned
     const contracts = await prisma.contract.findMany({
       where: {
-        status: { notIn: ['DIPERPANJANG', 'DIANGKAT_TETAP'] },
+        status: { notIn: ['DIPERPANJANG', 'RESIGN'] },
+        contractType: { not: 'PKWTT' },
       },
       include: {
         employee: {
@@ -354,17 +421,26 @@ export async function runContractExpirationCheck(): Promise<CronRunSummary> {
         const diffTime = endDate.getTime() - today.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 3600 * 24));
 
-        // Auto update status
-        // A contract is EXPIRED only when it is the employee's latest contract and has
-        // ended without a follow-up. Superseded contracts (those followed by the next
-        // contract) become DIPERPANJANG so they don't pollute the "Expired" list.
+        // A contract is only evaluated for expiration/alert if it is the employee's latest contract.
+        // Historical contracts (hasSuccessor > 0) remain AKTIF as contract history and are skipped.
+        const hasSuccessor = await prisma.contract.count({
+          where: { employeeId: contract.employeeId, sequence: { gt: contract.sequence } },
+        });
+
+        if (hasSuccessor > 0) {
+          if (contract.status !== 'RESIGN' && contract.status !== 'AKTIF') {
+            await prisma.contract.update({
+              where: { id: contract.id },
+              data: { status: 'AKTIF' },
+            });
+          }
+          continue;
+        }
+
         if (diffDays <= 0 && contract.status !== 'EXPIRED') {
-          const hasSuccessor = await prisma.contract.count({
-            where: { employeeId: contract.employeeId, sequence: { gt: contract.sequence } },
-          });
           await prisma.contract.update({
             where: { id: contract.id },
-            data: { status: hasSuccessor > 0 ? 'DIPERPANJANG' : 'EXPIRED' },
+            data: { status: 'EXPIRED' },
           });
         } else if (diffDays > 0 && diffDays <= 30 && contract.status === 'AKTIF') {
           await prisma.contract.update({
@@ -387,7 +463,7 @@ export async function runContractExpirationCheck(): Promise<CronRunSummary> {
             if (!ruleAlreadySent) {
               const message = rule.template
                 .replace('{{employeeName}}', contract.employee.name)
-                .replace('{{contractNumber}}', contract.contractNumber)
+                .replace('{{contractNumber}}', contract.contractNumber || '-')
                 .replace('{{endDate}}', formatDate(endDate));
 
               const result = await dispatchRule(contract, rule, message);
@@ -401,7 +477,9 @@ export async function runContractExpirationCheck(): Promise<CronRunSummary> {
         }
 
         // Escalation for overdue contracts with no follow-up (from H+1 onward)
-        if (diffDays < 0) {
+        // Skip escalation if the contract/employee is marked as Resign
+        const isResigned = contract.notes?.toLowerCase().includes('resign');
+        if (diffDays < 0 && !isResigned) {
           const result = await runEscalation(contract);
           if (result.escalated) {
             summary.escalations++;
@@ -442,15 +520,28 @@ export async function runContractExpirationCheck(): Promise<CronRunSummary> {
 }
 
 export function initCronJobs() {
+  const isDev = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
+  const enableCron = process.env.ENABLE_CRON === 'true';
+
+  // Nonaktifkan cron job & initial check otomatis di mode development
+  // untuk mencegah terkirimnya email ke karyawan saat server start / hot reload
+  if (process.env.ENABLE_CRON === 'false' || (isDev && !enableCron)) {
+    console.log('[Cron] ⏸️ Cron scheduler & startup check dinonaktifkan di development.');
+    console.log('[Cron] ℹ️ Set ENABLE_CRON=true di file .env jika ingin mengaktifkannya.');
+    return;
+  }
+
   // Run once daily at 01:00 AM
   cron.schedule('0 1 * * *', () => {
     runContractExpirationCheck();
   });
 
   // Run initial check on server startup
-  setTimeout(() => {
-    runContractExpirationCheck();
-  }, 5000);
+  if (process.env.SKIP_STARTUP_CRON_CHECK !== 'true') {
+    setTimeout(() => {
+      runContractExpirationCheck();
+    }, 5000);
+  }
 
   console.log('[Cron] Contract monitoring cron scheduler initialized.');
 }

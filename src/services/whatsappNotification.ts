@@ -14,7 +14,7 @@ export function buildWhatsAppMessage(params: {
   message: string;
   contract: {
     employee: { name: string };
-    contractNumber: string;
+    contractNumber?: string | null;
     endDate: Date | string;
   };
   footerText?: string;
@@ -27,7 +27,7 @@ export function buildWhatsAppMessage(params: {
     params.message,
     '',
     `Karyawan: ${params.contract.employee.name}`,
-    `No. Kontrak: ${params.contract.contractNumber}`,
+    `No. Kontrak: ${params.contract.contractNumber || '-'}`,
     `Tanggal Berakhir: ${endDate}`,
     '',
     params.footerText || 'Pesan ini dikirim otomatis oleh sistem monitoring kontrak PKWT.',

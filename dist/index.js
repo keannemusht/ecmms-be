@@ -16,6 +16,7 @@ const users_1 = __importDefault(require("./routes/users"));
 const departments_1 = __importDefault(require("./routes/departments"));
 const positions_1 = __importDefault(require("./routes/positions"));
 const auditLogs_1 = __importDefault(require("./routes/auditLogs"));
+const evaluations_1 = __importDefault(require("./routes/evaluations"));
 const cronService_1 = require("./services/cronService");
 const emailTemplate_1 = require("./services/emailTemplate");
 const upload_1 = require("./utils/upload");
@@ -44,6 +45,7 @@ app.use('/api/users', users_1.default);
 app.use('/api/departments', departments_1.default);
 app.use('/api/positions', positions_1.default);
 app.use('/api/audit-logs', auditLogs_1.default);
+app.use('/api/evaluations', evaluations_1.default);
 // Health check endpoint
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', system: 'ECMMS PKWT Monitoring API', timestamp: new Date().toISOString() });

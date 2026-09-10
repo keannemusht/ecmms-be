@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import prisma from '../prisma';
 import { authenticateJWT, AuthRequest, requireRole } from '../middleware/auth';
 import { logAudit } from '../utils/auditLogger';
+import { syncSystemNotificationsForUser } from '../services/cronService';
 import { Prisma, Role } from '@prisma/client';
 
 const router = Router();
@@ -67,6 +68,10 @@ router.post('/', authenticateJWT, requireRole(ROLES), async (req: AuthRequest, r
         isActive: true,
       },
     });
+
+    if (user.role === 'ADMIN' || user.role === 'MANAGEMENT') {
+      await syncSystemNotificationsForUser(user.id, user.role);
+    }
 
     await logAudit(req.user?.id, 'CREATE_USER', 'USER', `Created user account ${user.email} (${user.role})`, req.ip || '');
 

@@ -24,6 +24,7 @@ enum ContractStatus {
   EXPIRED
   DIPERPANJANG
   DIANGKAT_TETAP
+  RESIGN
 }
 
 enum NotificationChannel {
@@ -61,6 +62,7 @@ model User {
   contractsCreated     Contract[]          @relation("ContractCreatedBy")
   historyCreated       ContractHistory[]   @relation("HistoryChangedBy")
   submissionsProcessed SubmissionForm[]    @relation("SubmissionProcessedBy")
+  evaluationsCreated   ContractEvaluation[] @relation("EvaluationCreatedBy")
   notifications        InAppNotification[]
   auditLogs            AuditLog[]
 }
@@ -69,10 +71,11 @@ model Employee {
   id             String         @id @default(uuid())
   nik            String         @unique
   name           String
-  email          String         @unique
+  email          String?        @unique
   phone          String?
   department     String
   position       String
+  level          String?
   employmentType EmploymentType @default(PKWT)
   joinDate       DateTime
   user           User?
@@ -81,13 +84,14 @@ model Employee {
 
   contracts   Contract[]
   submissions SubmissionForm[]
+  evaluations ContractEvaluation[]
 }
 
 model Contract {
   id             String         @id @default(uuid())
   employeeId     String
   employee       Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  contractNumber String         @unique
+  contractNumber String?
   contractType   EmploymentType @default(PKWT)
   sequence       Int            @default(1)
   startDate      DateTime
@@ -103,6 +107,7 @@ model Contract {
   history       ContractHistory[]
   notifications NotificationLog[]
   inAppNotifications InAppNotification[]
+  evaluations   ContractEvaluation[]
 }
 
 model ContractHistory {
@@ -195,4 +200,46 @@ model Position {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model ContractEvaluation {
+  id                 String    @id @default(uuid())
+  documentNumber     String?
+  employeeId         String
+  employee           Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  contractId         String?
+  contract           Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  periodEnd          DateTime?
+  employeeLevel      String?   // Staff vs Non-Staff
+
+  scoresJson         String    // JSON string containing individual scores e.g. { "1": 4, "2": 3, ... }
+  statementsJson     String?   // JSON string containing statement checklists { "1": true, "2": true, "3": true }
+
+  totalScore         Float     // Sum of scores
+  averageScore       Float     // Computed average score (1.00 - 4.00)
+  ratingGrade        String?   // TIDAK MEMUASKAN, KURANG MEMUASKAN, CUKUP MEMUASKAN, MEMUASKAN
+
+  recommendationType String    // LANJUT_KONTRAK | SELESAI_KONTRAK
+  recommendationDuration Int?  // 3, 6, 12 months if LANJUT_KONTRAK
+
+  evaluatorName      String?
+  evaluatorPosition  String?
+  knownByName        String?
+  knownByPosition    String?
+  checkedByName      String?
+  checkedByPosition  String?
+  approvedByName     String?
+  approvedByPosition String?
+
+  evaluationDate     DateTime?
+  submittedDate      DateTime?
+  notes              String?
+
+  status             String    @default("COMPLETED") // DRAFT, COMPLETED
+  createdById        String?
+  createdBy          User?     @relation("EvaluationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 }

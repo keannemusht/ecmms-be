@@ -17,7 +17,7 @@ function startOfToday() {
  * 2. All contracts except the latest (highest sequence) are succeeded/historical contracts.
  *    If an older contract has status EXPIRED, AKTIF, or AKAN_BERAKHIR, it is updated to DIPERPANJANG.
  * 3. The latest contract's status is dynamically updated based on current date:
- *    - PKWTT -> DIANGKAT_TETAP
+ *    - PKWTT -> AKTIF
  *    - endDate < today -> EXPIRED
  *    - endDate <= today + 30 days -> AKAN_BERAKHIR
  *    - endDate > today + 30 days -> AKTIF
@@ -47,12 +47,27 @@ async function normalizeEmployeeContractStatuses(targetEmployeeId) {
             for (let i = 0; i < totalContracts; i++) {
                 const contract = contracts[i];
                 const isLatest = i === totalContracts - 1;
-                if (!isLatest) {
-                    // Historical contract: if status is EXPIRED, AKTIF, or AKAN_BERAKHIR, change to DIPERPANJANG
-                    if (['EXPIRED', 'AKTIF', 'AKAN_BERAKHIR'].includes(contract.status)) {
+                const notesLower = (contract.notes || '').toLowerCase();
+                const isContractResign = contract.status === 'RESIGN' ||
+                    notesLower.includes('resign') ||
+                    notesLower.includes('exit') ||
+                    notesLower.includes('keluar');
+                if (isContractResign) {
+                    if (contract.status !== 'RESIGN') {
                         await prisma_1.default.contract.update({
                             where: { id: contract.id },
-                            data: { status: 'DIPERPANJANG' },
+                            data: { status: 'RESIGN' },
+                        });
+                        contractsUpdated++;
+                    }
+                    continue;
+                }
+                if (!isLatest) {
+                    // Historical contract: keep as AKTIF (unless RESIGN)
+                    if (contract.status !== 'RESIGN' && contract.status !== 'AKTIF') {
+                        await prisma_1.default.contract.update({
+                            where: { id: contract.id },
+                            data: { status: 'AKTIF' },
                         });
                         contractsUpdated++;
                     }
@@ -61,7 +76,7 @@ async function normalizeEmployeeContractStatuses(targetEmployeeId) {
                     // Latest contract: evaluate status based on end date & employment type
                     let targetStatus = 'AKTIF';
                     if (emp.employmentType === 'PKWTT' || contract.contractType === 'PKWTT') {
-                        targetStatus = 'DIANGKAT_TETAP';
+                        targetStatus = 'AKTIF';
                     }
                     else {
                         const endDate = new Date(contract.endDate);
