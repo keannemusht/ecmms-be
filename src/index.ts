@@ -57,6 +57,10 @@ app.get('/api/health', (req, res) => {
 // Cron endpoint for Vercel Cron Jobs (see vercel.json). Runs the daily contract
 // expiration / notification check. Protected so it can't be triggered manually.
 app.get('/api/cron/contract-expiration', async (req, res) => {
+  if (process.env.ENABLE_CRON === 'false') {
+    return res.status(200).json({ ok: true, message: 'Cron is disabled via ENABLE_CRON=false.' });
+  }
+
   const cronSecret = process.env.CRON_SECRET;
   const isVercelCron =
     req.get('x-vercel-cron') === '1' ||

@@ -49,8 +49,10 @@ router.get('/', authenticateJWT, async (req: AuthRequest, res: Response) => {
     }
 
     const orderDir: Prisma.SortOrder = sortOrder === 'desc' ? 'desc' : 'asc';
-    let orderByClause: Prisma.ContractOrderByWithRelationInput = { endDate: orderDir };
-    if (sortBy === 'startDate') {
+    let orderByClause: Prisma.ContractOrderByWithRelationInput = { employee: { name: orderDir } };
+    if (sortBy === 'endDate') {
+      orderByClause = { endDate: orderDir };
+    } else if (sortBy === 'startDate') {
       orderByClause = { startDate: orderDir };
     } else if (sortBy === 'contractNumber') {
       orderByClause = { contractNumber: orderDir };
@@ -341,9 +343,14 @@ router.post('/:id/extend', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT'])
       return res.status(400).json({ error: 'Field wajib: Tanggal Mulai Baru, Tanggal Berakhir Baru.' });
     }
 
-    const dept = oldContract.employee?.department?.substring(0, 3).toUpperCase() || 'EMP';
-    const fallbackNo = `PKWT/${new Date().getFullYear()}/${dept}/${Math.floor(Math.random() * 900 + 100)}`;
-    const effectiveContractNumber = newContractNumber && String(newContractNumber).trim() !== '' ? String(newContractNumber).trim() : fallbackNo;
+    const effectiveContractNumber = newContractNumber && String(newContractNumber).trim() !== '' ? String(newContractNumber).trim() : null;
+
+    if (effectiveContractNumber) {
+      const existingNumber = await prisma.contract.findFirst({ where: { contractNumber: effectiveContractNumber } });
+      if (existingNumber) {
+        return res.status(400).json({ error: `Nomor kontrak '${effectiveContractNumber}' sudah terdaftar.` });
+      }
+    }
 
     await prisma.contract.update({
       where: { id },
@@ -359,7 +366,7 @@ router.post('/:id/extend', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT'])
         startDate: new Date(newStartDate),
         endDate: new Date(newEndDate),
         status: 'AKTIF',
-        notes: notes || `Perpanjangan dari kontrak ${oldContract.contractNumber}`,
+        notes: notes || (oldContract.contractNumber ? `Perpanjangan dari kontrak ${oldContract.contractNumber}` : 'Perpanjangan kontrak'),
         createdById: req.user?.id,
       },
       include: { employee: true },

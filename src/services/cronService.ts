@@ -30,10 +30,10 @@ function buildEmailContext(params: {
   footerTextEn?: string;
 }) {
   const employeeName = params.contract.employee.name;
-  const contractNumber = params.contract.contractNumber;
+  const contractNumber = params.contract.contractNumber || '-';
   const endDate = formatDate(new Date(params.contract.endDate));
 
-  const enMessage = `Contract ${employeeName} (${contractNumber}) will expire on ${endDate}. Please review and follow up as needed.`;
+  const enMessage = `Contract ${employeeName}${params.contract.contractNumber ? ` (${params.contract.contractNumber})` : ''} will expire on ${endDate}. Please review and follow up as needed.`;
 
   return {
     appName: 'ECMMS',
@@ -329,7 +329,7 @@ async function runEscalation(contract: any): Promise<{ escalated: boolean; email
   let emailsSent = 0;
   let emailsFailed = 0;
 
-  const message = `Eskalasi: Kontrak ${contract.employee.name} (${contract.contractNumber}) telah melewati tanggal berakhir (${formatDate(new Date(contract.endDate))}) dan belum ada tindak lanjut.`;
+  const message = `Eskalasi: Kontrak ${contract.employee.name}${contract.contractNumber ? ` (${contract.contractNumber})` : ''} telah melewati tanggal berakhir (${formatDate(new Date(contract.endDate))}) dan belum ada tindak lanjut.`;
   const recipients = await resolveRecipients('MANAGEMENT', contract.employee);
 
   await sendInApp(recipients.userIds, 'Eskalasi Kontrak', message);
