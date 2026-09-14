@@ -29,10 +29,16 @@ router.get('/', authenticateJWT, async (req: AuthRequest, res: Response) => {
         whereClause.contractType = contractType as EmploymentType;
       }
       if (search) {
+        const q = String(search).trim();
         whereClause.OR = [
-          { contractNumber: { contains: String(search), mode: 'insensitive' } },
-          { employee: { name: { contains: String(search), mode: 'insensitive' } } },
-          { employee: { nik: { contains: String(search), mode: 'insensitive' } } },
+          { contractNumber: { contains: q, mode: 'insensitive' } },
+          { employee: { name: { contains: q, mode: 'insensitive' } } },
+          { employee: { nik: { contains: q, mode: 'insensitive' } } },
+          { employee: { department: { contains: q, mode: 'insensitive' } } },
+          { employee: { position: { contains: q, mode: 'insensitive' } } },
+          { employee: { email: { contains: q, mode: 'insensitive' } } },
+          { employee: { phone: { contains: q, mode: 'insensitive' } } },
+          { notes: { contains: q, mode: 'insensitive' } },
         ];
       }
       if (dateFrom || dateTo) {

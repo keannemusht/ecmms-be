@@ -8,12 +8,12 @@ const prisma_1 = __importDefault(require("../prisma"));
 const auth_1 = require("../middleware/auth");
 const auditLogger_1 = require("../utils/auditLogger");
 const whatsappNotification_1 = require("../services/whatsappNotification");
-const contractNormalizer_1 = require("../services/contractNormalizer");
+const employeeLevel_1 = require("../lib/employeeLevel");
 const router = (0, express_1.Router)();
 // GET /api/employees
 router.get('/', auth_1.authenticateJWT, async (req, res) => {
     try {
-        const { search, department, employmentType } = req.query;
+        const { search, department, employmentType, status, dateFrom, dateTo, sortBy, sortOrder } = req.query;
         if (req.user?.role === 'USER') {
             if (!req.user.employeeId) {
                 return res.status(404).json({ error: 'Data karyawan tidak terhubung dengan akun ini.' });
@@ -33,11 +33,22 @@ router.get('/', auth_1.authenticateJWT, async (req, res) => {
         }
         const whereClause = {};
         if (search) {
+            const q = String(search).trim();
             whereClause.OR = [
-                { name: { contains: String(search), mode: 'insensitive' } },
-                { nik: { contains: String(search), mode: 'insensitive' } },
-                { email: { contains: String(search), mode: 'insensitive' } },
-                { position: { contains: String(search), mode: 'insensitive' } },
+                { name: { contains: q, mode: 'insensitive' } },
+                { nik: { contains: q, mode: 'insensitive' } },
+                { email: { contains: q, mode: 'insensitive' } },
+                { phone: { contains: q, mode: 'insensitive' } },
+                { department: { contains: q, mode: 'insensitive' } },
+                { position: { contains: q, mode: 'insensitive' } },
+                { level: { contains: q, mode: 'insensitive' } },
+                {
+                    contracts: {
+                        some: {
+                            contractNumber: { contains: q, mode: 'insensitive' },
+                        },
+                    },
+                },
             ];
         }
         if (department) {
@@ -45,6 +56,37 @@ router.get('/', auth_1.authenticateJWT, async (req, res) => {
         }
         if (employmentType) {
             whereClause.employmentType = employmentType;
+        }
+        if (status) {
+            whereClause.contracts = {
+                some: {
+                    status: status,
+                },
+            };
+        }
+        if (dateFrom || dateTo) {
+            const dateFilter = {};
+            if (dateFrom) {
+                dateFilter.gte = new Date(String(dateFrom) + 'T00:00:00.000Z');
+            }
+            if (dateTo) {
+                dateFilter.lte = new Date(String(dateTo) + 'T23:59:59.999Z');
+            }
+            whereClause.joinDate = dateFilter;
+        }
+        const orderDir = sortOrder === 'desc' ? 'desc' : 'asc';
+        let orderByClause = { name: orderDir };
+        if (sortBy === 'nik') {
+            orderByClause = { nik: orderDir };
+        }
+        else if (sortBy === 'createdAt') {
+            orderByClause = { createdAt: orderDir };
+        }
+        else if (sortBy === 'joinDate') {
+            orderByClause = { joinDate: orderDir };
+        }
+        else if (sortBy === 'department') {
+            orderByClause = { department: orderDir };
         }
         const employees = await prisma_1.default.employee.findMany({
             where: whereClause,
@@ -56,7 +98,7 @@ router.get('/', auth_1.authenticateJWT, async (req, res) => {
                     select: { id: true, email: true, role: true, isActive: true },
                 },
             },
-            orderBy: { createdAt: 'desc' },
+            orderBy: orderByClause,
         });
         return res.json({ employees, total: employees.length });
     }
@@ -182,7 +224,7 @@ router.post('/', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MANA
                 phone: cleanPhone,
                 department,
                 position,
-                level: level || 'Staff',
+                level: level && String(level).trim() !== '' ? String(level).trim() : (0, employeeLevel_1.determineEmployeeLevel)(position),
                 employmentType,
                 joinDate: new Date(joinDate),
             },
@@ -290,8 +332,14 @@ router.post('/bulk-import', auth_1.authenticateJWT, (0, auth_1.requireRole)(['AD
             const cleanPhone = emp.phone && String(emp.phone).trim() !== '' ? String(emp.phone).trim() : null;
             const department = String(emp.department).trim();
             const position = String(emp.position).trim();
-            const level = emp.level ? String(emp.level).trim() : 'Staff';
-            const employmentType = (emp.employmentType || 'PKWT');
+            const level = emp.level && String(emp.level).trim() !== '' ? String(emp.level).trim() : (0, employeeLevel_1.determineEmployeeLevel)(position);
+            // Check if this row indicates permanent / PKWTT
+            const rawType = String(emp.employmentType || '').trim().toUpperCase();
+            const statusStr = String(emp.contractNotes || emp.status || '').trim();
+            const isRowPKWTT = rawType.includes('TETAP') || rawType.includes('PKWTT') ||
+                statusStr.toLowerCase().includes('pkwtt') ||
+                statusStr.toLowerCase().includes('tetap');
+            const rowContractType = isRowPKWTT ? 'PKWTT' : (rawType.includes('MAGANG') ? 'MAGANG' : 'PKWT');
             if (!empMap.has(nik)) {
                 empMap.set(nik, {
                     nik,
@@ -301,7 +349,7 @@ router.post('/bulk-import', auth_1.authenticateJWT, (0, auth_1.requireRole)(['AD
                     department,
                     position,
                     level,
-                    employmentType,
+                    employmentType: rowContractType,
                     joinDate,
                     contracts: [],
                 });
@@ -311,77 +359,142 @@ router.post('/bulk-import', auth_1.authenticateJWT, (0, auth_1.requireRole)(['AD
                 currentEmp.email = cleanEmail;
             if (!currentEmp.phone && cleanPhone)
                 currentEmp.phone = cleanPhone;
-            if (emp.contractStartDate && emp.contractEndDate) {
+            // If any row for this employee indicates PKWTT, promote employee to PKWTT
+            if (isRowPKWTT) {
+                currentEmp.employmentType = 'PKWTT';
+            }
+            const rawContractNo = emp.contractNumber && String(emp.contractNumber).trim() !== '' ? String(emp.contractNumber).trim() : null;
+            // Parse contract dates
+            if (emp.contractStartDate) {
                 const sDate = new Date(emp.contractStartDate);
-                const eDate = new Date(emp.contractEndDate);
-                if (!isNaN(sDate.getTime()) && !isNaN(eDate.getTime())) {
-                    const rawContractNo = emp.contractNumber && String(emp.contractNumber).trim() !== '' ? String(emp.contractNumber).trim() : null;
+                if (!isNaN(sDate.getTime())) {
+                    let eDate = null;
+                    if (emp.contractEndDate) {
+                        const parsedEnd = new Date(emp.contractEndDate);
+                        if (!isNaN(parsedEnd.getTime())) {
+                            eDate = parsedEnd;
+                        }
+                    }
+                    // For PKWTT (Permanent), end date is not applicable in HR records.
+                    // Store far-future date (2099-12-31) so DB integrity is maintained without expiring.
+                    if (!eDate && isRowPKWTT) {
+                        eDate = new Date('2099-12-31T00:00:00.000Z');
+                    }
+                    else if (!eDate) {
+                        eDate = new Date(sDate.getTime() + 365 * 86400000);
+                    }
                     currentEmp.contracts.push({
                         contractNumber: rawContractNo,
                         startDate: sDate,
                         endDate: eDate,
-                        statusStr: String(emp.contractNotes || emp.status || ''),
-                        contractType: (emp.contractType || employmentType),
+                        statusStr,
+                        contractType: rowContractType,
                     });
                 }
             }
         }
-        // Sync departments
+        // Sync departments in batch
         const uniqueDepts = Array.from(new Set(Array.from(empMap.values()).map((e) => e.department).filter(Boolean)));
-        for (const d of uniqueDepts) {
-            await prisma_1.default.department.upsert({
-                where: { name: d },
-                update: {},
-                create: { name: d },
-            }).catch(() => { });
+        const existingDepts = await prisma_1.default.department.findMany({
+            where: { name: { in: uniqueDepts } },
+            select: { name: true },
+        });
+        const existingDeptNames = new Set(existingDepts.map((d) => d.name));
+        const missingDepts = uniqueDepts.filter((d) => !existingDeptNames.has(d));
+        if (missingDepts.length > 0) {
+            await prisma_1.default.department.createMany({
+                data: missingDepts.map((name) => ({ name })),
+                skipDuplicates: true,
+            });
         }
-        // Sync positions
+        // Sync positions in batch
         const uniquePositions = Array.from(new Set(Array.from(empMap.values()).map((e) => e.position).filter(Boolean)));
-        for (const p of uniquePositions) {
-            await prisma_1.default.position.upsert({
-                where: { name: p },
-                update: {},
-                create: { name: p },
-            }).catch(() => { });
+        const existingPositions = await prisma_1.default.position.findMany({
+            where: { name: { in: uniquePositions } },
+            select: { name: true },
+        });
+        const existingPosNames = new Set(existingPositions.map((p) => p.name));
+        const missingPositions = uniquePositions.filter((p) => !existingPosNames.has(p));
+        if (missingPositions.length > 0) {
+            await prisma_1.default.position.createMany({
+                data: missingPositions.map((name) => ({ name })),
+                skipDuplicates: true,
+            });
         }
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        for (const [, empData] of empMap.entries()) {
-            try {
-                const employee = await prisma_1.default.employee.upsert({
-                    where: { nik: empData.nik },
-                    update: {
-                        name: empData.name,
-                        ...(empData.email ? { email: empData.email } : {}),
-                        phone: empData.phone,
-                        department: empData.department,
-                        position: empData.position,
-                        level: empData.level,
-                        employmentType: empData.employmentType,
-                        joinDate: empData.joinDate,
-                    },
-                    create: {
-                        nik: empData.nik,
-                        name: empData.name,
-                        email: empData.email,
-                        phone: empData.phone,
-                        department: empData.department,
-                        position: empData.position,
-                        level: empData.level,
-                        employmentType: empData.employmentType,
-                        joinDate: empData.joinDate,
-                    },
-                });
-                // Record all contracts (sorted by startDate ascending)
+        const empDataList = Array.from(empMap.values());
+        const employeeRecords = {}; // nik -> id
+        // Upsert employees in parallel chunks of 50 for rapid database execution
+        const CHUNK_SIZE = 50;
+        for (let i = 0; i < empDataList.length; i += CHUNK_SIZE) {
+            const chunk = empDataList.slice(i, i + CHUNK_SIZE);
+            await Promise.all(chunk.map(async (empData) => {
+                try {
+                    const employee = await prisma_1.default.employee.upsert({
+                        where: { nik: empData.nik },
+                        update: {
+                            name: empData.name,
+                            ...(empData.email ? { email: empData.email } : {}),
+                            phone: empData.phone,
+                            department: empData.department,
+                            position: empData.position,
+                            level: empData.level,
+                            employmentType: empData.employmentType,
+                            joinDate: empData.joinDate,
+                        },
+                        create: {
+                            nik: empData.nik,
+                            name: empData.name,
+                            email: empData.email,
+                            phone: empData.phone,
+                            department: empData.department,
+                            position: empData.position,
+                            level: empData.level,
+                            employmentType: empData.employmentType,
+                            joinDate: empData.joinDate,
+                        },
+                    });
+                    employeeRecords[empData.nik] = employee.id;
+                    successCount++;
+                }
+                catch (err) {
+                    failedCount++;
+                    const errorMessage = err instanceof Error ? err.message : String(err);
+                    errors.push(`Error NIK ${empData.nik}: ${errorMessage}`);
+                }
+            }));
+        }
+        const validEmpIds = Object.values(employeeRecords);
+        if (validEmpIds.length > 0) {
+            // Delete existing contracts for imported employees in a single batch query
+            await prisma_1.default.contract.deleteMany({
+                where: { employeeId: { in: validEmpIds } },
+            });
+            // Prepare all contracts to insert
+            const contractsToCreate = [];
+            for (const empData of empDataList) {
+                const empId = employeeRecords[empData.nik];
+                if (!empId)
+                    continue;
+                // Auto-create permanent contract if employee is PKWTT and had no contract row specified
+                if (empData.contracts.length === 0 && empData.employmentType === 'PKWTT') {
+                    empData.contracts.push({
+                        contractNumber: null,
+                        startDate: empData.joinDate,
+                        endDate: new Date('2099-12-31T00:00:00.000Z'),
+                        statusStr: 'Aktif (PKWTT)',
+                        contractType: 'PKWTT',
+                    });
+                }
                 if (empData.contracts.length > 0) {
                     empData.contracts.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
-                    // Clean existing contracts if re-importing this employee to keep clean 1..N order
-                    await prisma_1.default.contract.deleteMany({ where: { employeeId: employee.id } });
                     const total = empData.contracts.length;
                     for (let i = 0; i < total; i++) {
                         const c = empData.contracts[i];
                         const seq = i + 1;
                         const isLatest = i === total - 1;
+                        const isPKWTTContract = c.contractType === 'PKWTT' || empData.employmentType === 'PKWTT';
                         const diffDays = Math.ceil((c.endDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
                         const isResign = c.statusStr.toLowerCase().includes('resign') ||
                             c.statusStr.toLowerCase().includes('exit') ||
@@ -391,7 +504,7 @@ router.post('/bulk-import', auth_1.authenticateJWT, (0, auth_1.requireRole)(['AD
                             status = 'RESIGN';
                         }
                         else if (isLatest) {
-                            if (c.contractType === 'PKWTT' || empData.employmentType === 'PKWTT') {
+                            if (isPKWTTContract) {
                                 status = 'AKTIF';
                             }
                             else if (diffDays <= 0) {
@@ -406,32 +519,32 @@ router.post('/bulk-import', auth_1.authenticateJWT, (0, auth_1.requireRole)(['AD
                         }
                         const notes = isResign
                             ? `Resign${c.statusStr ? ` - ${c.statusStr}` : ''}`
-                            : (c.statusStr ? c.statusStr : `Kontrak Ke-${seq}`);
-                        await prisma_1.default.contract.create({
-                            data: {
-                                employeeId: employee.id,
-                                contractNumber: c.contractNumber,
-                                contractType: c.contractType,
-                                sequence: seq,
-                                startDate: c.startDate,
-                                endDate: c.endDate,
-                                status,
-                                notes,
-                                createdById: req.user?.id || null,
-                            },
+                            : isPKWTTContract && isLatest
+                                ? (c.statusStr ? c.statusStr : 'Diangkat Tetap (PKWTT)')
+                                : (c.statusStr ? c.statusStr : `Kontrak Ke-${seq}`);
+                        contractsToCreate.push({
+                            employeeId: empId,
+                            contractNumber: c.contractNumber,
+                            contractType: c.contractType,
+                            sequence: seq,
+                            startDate: c.startDate,
+                            endDate: c.endDate,
+                            status,
+                            notes,
+                            createdById: req.user?.id || null,
                         });
                     }
                 }
-                successCount++;
             }
-            catch (err) {
-                failedCount++;
-                const errorMessage = err instanceof Error ? err.message : String(err);
-                errors.push(`Error NIK ${empData.nik}: ${errorMessage}`);
+            // Batch insert all contracts in chunks of 500
+            if (contractsToCreate.length > 0) {
+                for (let i = 0; i < contractsToCreate.length; i += 500) {
+                    await prisma_1.default.contract.createMany({
+                        data: contractsToCreate.slice(i, i + 500),
+                    });
+                }
             }
         }
-        // Normalize contract statuses across all employees
-        await (0, contractNormalizer_1.normalizeEmployeeContractStatuses)();
         await (0, auditLogger_1.logAudit)(req.user?.id, 'BULK_IMPORT', 'EMPLOYEE', `Imported ${successCount} employees (${failedCount} failed)`, req.ip || '');
         return res.json({
             message: `Proses import selesai. Berhasil: ${successCount} karyawan, Gagal: ${failedCount}`,

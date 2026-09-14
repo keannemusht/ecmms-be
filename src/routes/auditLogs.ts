@@ -21,6 +21,8 @@ router.get('/', authenticateJWT, requireRole(['ADMIN']), async (req: AuthRequest
         { entity: { contains: s, mode: 'insensitive' } },
         { details: { contains: s, mode: 'insensitive' } },
         { user: { name: { contains: s, mode: 'insensitive' } } },
+        { user: { email: { contains: s, mode: 'insensitive' } } },
+        { ipAddress: { contains: s, mode: 'insensitive' } },
       ];
     }
 

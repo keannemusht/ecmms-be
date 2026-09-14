@@ -30,10 +30,16 @@ router.get('/', auth_1.authenticateJWT, async (req, res) => {
                 whereClause.contractType = contractType;
             }
             if (search) {
+                const q = String(search).trim();
                 whereClause.OR = [
-                    { contractNumber: { contains: String(search), mode: 'insensitive' } },
-                    { employee: { name: { contains: String(search), mode: 'insensitive' } } },
-                    { employee: { nik: { contains: String(search), mode: 'insensitive' } } },
+                    { contractNumber: { contains: q, mode: 'insensitive' } },
+                    { employee: { name: { contains: q, mode: 'insensitive' } } },
+                    { employee: { nik: { contains: q, mode: 'insensitive' } } },
+                    { employee: { department: { contains: q, mode: 'insensitive' } } },
+                    { employee: { position: { contains: q, mode: 'insensitive' } } },
+                    { employee: { email: { contains: q, mode: 'insensitive' } } },
+                    { employee: { phone: { contains: q, mode: 'insensitive' } } },
+                    { notes: { contains: q, mode: 'insensitive' } },
                 ];
             }
             if (dateFrom || dateTo) {
@@ -49,8 +55,11 @@ router.get('/', auth_1.authenticateJWT, async (req, res) => {
             }
         }
         const orderDir = sortOrder === 'desc' ? 'desc' : 'asc';
-        let orderByClause = { endDate: orderDir };
-        if (sortBy === 'startDate') {
+        let orderByClause = { employee: { name: orderDir } };
+        if (sortBy === 'endDate') {
+            orderByClause = { endDate: orderDir };
+        }
+        else if (sortBy === 'startDate') {
             orderByClause = { startDate: orderDir };
         }
         else if (sortBy === 'contractNumber') {
@@ -305,9 +314,13 @@ router.post('/:id/extend', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADM
         if (!newStartDate || !newEndDate) {
             return res.status(400).json({ error: 'Field wajib: Tanggal Mulai Baru, Tanggal Berakhir Baru.' });
         }
-        const dept = oldContract.employee?.department?.substring(0, 3).toUpperCase() || 'EMP';
-        const fallbackNo = `PKWT/${new Date().getFullYear()}/${dept}/${Math.floor(Math.random() * 900 + 100)}`;
-        const effectiveContractNumber = newContractNumber && String(newContractNumber).trim() !== '' ? String(newContractNumber).trim() : fallbackNo;
+        const effectiveContractNumber = newContractNumber && String(newContractNumber).trim() !== '' ? String(newContractNumber).trim() : null;
+        if (effectiveContractNumber) {
+            const existingNumber = await prisma_1.default.contract.findFirst({ where: { contractNumber: effectiveContractNumber } });
+            if (existingNumber) {
+                return res.status(400).json({ error: `Nomor kontrak '${effectiveContractNumber}' sudah terdaftar.` });
+            }
+        }
         await prisma_1.default.contract.update({
             where: { id },
             data: { status: 'AKTIF' },
@@ -321,7 +334,7 @@ router.post('/:id/extend', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADM
                 startDate: new Date(newStartDate),
                 endDate: new Date(newEndDate),
                 status: 'AKTIF',
-                notes: notes || `Perpanjangan dari kontrak ${oldContract.contractNumber}`,
+                notes: notes || (oldContract.contractNumber ? `Perpanjangan dari kontrak ${oldContract.contractNumber}` : 'Perpanjangan kontrak'),
                 createdById: req.user?.id,
             },
             include: { employee: true },

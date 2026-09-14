@@ -17,6 +17,7 @@ const departments_1 = __importDefault(require("./routes/departments"));
 const positions_1 = __importDefault(require("./routes/positions"));
 const auditLogs_1 = __importDefault(require("./routes/auditLogs"));
 const evaluations_1 = __importDefault(require("./routes/evaluations"));
+const search_1 = __importDefault(require("./routes/search"));
 const cronService_1 = require("./services/cronService");
 const emailTemplate_1 = require("./services/emailTemplate");
 const upload_1 = require("./utils/upload");
@@ -46,6 +47,7 @@ app.use('/api/departments', departments_1.default);
 app.use('/api/positions', positions_1.default);
 app.use('/api/audit-logs', auditLogs_1.default);
 app.use('/api/evaluations', evaluations_1.default);
+app.use('/api/search', search_1.default);
 // Health check endpoint
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', system: 'ECMMS PKWT Monitoring API', timestamp: new Date().toISOString() });
@@ -53,6 +55,9 @@ app.get('/api/health', (req, res) => {
 // Cron endpoint for Vercel Cron Jobs (see vercel.json). Runs the daily contract
 // expiration / notification check. Protected so it can't be triggered manually.
 app.get('/api/cron/contract-expiration', async (req, res) => {
+    if (process.env.ENABLE_CRON === 'false') {
+        return res.status(200).json({ ok: true, message: 'Cron is disabled via ENABLE_CRON=false.' });
+    }
     const cronSecret = process.env.CRON_SECRET;
     const isVercelCron = req.get('x-vercel-cron') === '1' ||
         req.get('x-vercel-cron-schedule') !== undefined ||

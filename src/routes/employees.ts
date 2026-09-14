@@ -37,11 +37,22 @@ router.get('/', authenticateJWT, async (req: AuthRequest, res: Response) => {
     const whereClause: Prisma.EmployeeWhereInput = {};
 
     if (search) {
+      const q = String(search).trim();
       whereClause.OR = [
-        { name: { contains: String(search), mode: 'insensitive' } },
-        { nik: { contains: String(search), mode: 'insensitive' } },
-        { email: { contains: String(search), mode: 'insensitive' } },
-        { position: { contains: String(search), mode: 'insensitive' } },
+        { name: { contains: q, mode: 'insensitive' } },
+        { nik: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { phone: { contains: q, mode: 'insensitive' } },
+        { department: { contains: q, mode: 'insensitive' } },
+        { position: { contains: q, mode: 'insensitive' } },
+        { level: { contains: q, mode: 'insensitive' } },
+        {
+          contracts: {
+            some: {
+              contractNumber: { contains: q, mode: 'insensitive' },
+            },
+          },
+        },
       ];
     }
 

@@ -64,12 +64,18 @@ router.get('/', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']), async (re
     }
 
     if (search) {
-      const q = String(search);
+      const q = String(search).trim();
       whereClause.OR = [
         { documentNumber: { contains: q, mode: 'insensitive' } },
         { employee: { name: { contains: q, mode: 'insensitive' } } },
         { employee: { nik: { contains: q, mode: 'insensitive' } } },
         { employee: { department: { contains: q, mode: 'insensitive' } } },
+        { employee: { position: { contains: q, mode: 'insensitive' } } },
+        { contract: { contractNumber: { contains: q, mode: 'insensitive' } } },
+        { evaluatorName: { contains: q, mode: 'insensitive' } },
+        { notes: { contains: q, mode: 'insensitive' } },
+        { ratingGrade: { contains: q, mode: 'insensitive' } },
+        { recommendationType: { contains: q, mode: 'insensitive' } },
       ];
     }
 

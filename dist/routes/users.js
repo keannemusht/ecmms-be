@@ -46,7 +46,7 @@ router.post('/', auth_1.authenticateJWT, (0, auth_1.requireRole)(ROLES), async (
             return res.status(400).json({ error: 'Field wajib: Email, Password, Nama, dan Peran (Role).' });
         }
         if (!isRequesterAdmin(req) && role === 'ADMIN') {
-            return res.status(403).json({ error: 'Hanya Admin yang dapat membuat akun dengan peran ADMIN.' });
+            return res.status(403).json({ error: 'Hanya pengguna Full Access yang dapat membuat akun dengan peran Full Access.' });
         }
         const existing = await prisma_1.default.user.findUnique({ where: { email } });
         if (existing) {
@@ -87,7 +87,7 @@ router.put('/:id', auth_1.authenticateJWT, (0, auth_1.requireRole)(ROLES), async
         }
         if (!isRequesterAdmin(req)) {
             if (existing.role === 'ADMIN' || role === 'ADMIN') {
-                return res.status(403).json({ error: 'Hanya Admin yang dapat mengelola akun dengan peran ADMIN.' });
+                return res.status(403).json({ error: 'Hanya pengguna Full Access yang dapat mengelola akun dengan peran Full Access.' });
             }
         }
         if (id === req.user?.id && (role && role !== existing.role)) {
@@ -131,7 +131,7 @@ router.delete('/:id', auth_1.authenticateJWT, (0, auth_1.requireRole)(ROLES), as
             return res.status(404).json({ error: 'User tidak ditemukan.' });
         }
         if (!isRequesterAdmin(req) && existing.role === 'ADMIN') {
-            return res.status(403).json({ error: 'Hanya Admin yang dapat menghapus akun dengan peran ADMIN.' });
+            return res.status(403).json({ error: 'Hanya pengguna Full Access yang dapat menghapus akun dengan peran Full Access.' });
         }
         await prisma_1.default.user.delete({ where: { id } });
         await (0, auditLogger_1.logAudit)(req.user?.id, 'DELETE_USER', 'USER', `Deleted user account ${existing.email}`, req.ip || '');

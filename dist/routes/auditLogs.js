@@ -23,6 +23,8 @@ router.get('/', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN']), asyn
                 { entity: { contains: s, mode: 'insensitive' } },
                 { details: { contains: s, mode: 'insensitive' } },
                 { user: { name: { contains: s, mode: 'insensitive' } } },
+                { user: { email: { contains: s, mode: 'insensitive' } } },
+                { ipAddress: { contains: s, mode: 'insensitive' } },
             ];
         }
         const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
