@@ -48,7 +48,7 @@ router.post('/', authenticateJWT, requireRole(ROLES), async (req: AuthRequest, r
     }
 
     if (!isRequesterAdmin(req) && role === 'ADMIN') {
-      return res.status(403).json({ error: 'Hanya Admin yang dapat membuat akun dengan peran ADMIN.' });
+      return res.status(403).json({ error: 'Hanya pengguna Full Access yang dapat membuat akun dengan peran Full Access.' });
     }
 
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -97,7 +97,7 @@ router.put('/:id', authenticateJWT, requireRole(ROLES), async (req: AuthRequest,
 
     if (!isRequesterAdmin(req)) {
       if (existing.role === 'ADMIN' || role === 'ADMIN') {
-        return res.status(403).json({ error: 'Hanya Admin yang dapat mengelola akun dengan peran ADMIN.' });
+        return res.status(403).json({ error: 'Hanya pengguna Full Access yang dapat mengelola akun dengan peran Full Access.' });
       }
     }
 
@@ -152,7 +152,7 @@ router.delete('/:id', authenticateJWT, requireRole(ROLES), async (req: AuthReque
     }
 
     if (!isRequesterAdmin(req) && existing.role === 'ADMIN') {
-      return res.status(403).json({ error: 'Hanya Admin yang dapat menghapus akun dengan peran ADMIN.' });
+      return res.status(403).json({ error: 'Hanya pengguna Full Access yang dapat menghapus akun dengan peran Full Access.' });
     }
 
     await prisma.user.delete({ where: { id } });
