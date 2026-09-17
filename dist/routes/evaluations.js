@@ -7,6 +7,7 @@ const express_1 = require("express");
 const prisma_1 = __importDefault(require("../prisma"));
 const auth_1 = require("../middleware/auth");
 const auditLogger_1 = require("../utils/auditLogger");
+const evaluationNotification_1 = require("../services/evaluationNotification");
 const router = (0, express_1.Router)();
 // Helper to compute score and recommendations based on Batara's official rules:
 // - Nilai 2-2.75 = 3 bulan perpanjangan
@@ -33,8 +34,8 @@ function calculateEvaluationScores(scores) {
     }
     else if (averageScore >= 2.0) {
         ratingGrade = 'KURANG MEMUASKAN';
-        recommendationType = 'LANJUT_KONTRAK';
-        recommendationDuration = 3;
+        recommendationType = 'SELESAI_KONTRAK';
+        recommendationDuration = null;
     }
     else {
         ratingGrade = 'TIDAK MEMUASKAN';
@@ -284,17 +285,267 @@ router.put('/:id', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MA
 router.delete('/:id', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MANAGEMENT']), async (req, res) => {
     try {
         const id = String(req.params.id);
-        const existing = await prisma_1.default.contractEvaluation.findUnique({ where: { id }, include: { employee: true } });
+        const existing = await prisma_1.default.contractEvaluation.findUnique({
+            where: { id },
+            include: { employee: { select: { name: true } } },
+        });
         if (!existing) {
             return res.status(404).json({ error: 'Data penilaian tidak ditemukan.' });
         }
         await prisma_1.default.contractEvaluation.delete({ where: { id } });
-        await (0, auditLogger_1.logAudit)(req.user?.id, 'DELETE_EVALUATION', 'CONTRACT_EVALUATION', `Deleted evaluation for ${existing.employee.name}`, req.ip || '');
-        return res.json({ message: 'Data penilaian berhasil dihapus.' });
+        await (0, auditLogger_1.logAudit)(req.user?.id, 'DELETE_EVALUATION', 'CONTRACT_EVALUATION', `Deleted contract evaluation ${existing.documentNumber || existing.id} for ${existing.employee?.name || ''}`, req.ip || '');
+        return res.json({ message: 'Data penilaian kontrak berhasil dihapus.' });
     }
     catch (error) {
         console.error('Error deleting evaluation:', error);
         return res.status(500).json({ error: 'Gagal menghapus penilaian kontrak.' });
+    }
+});
+// POST /api/evaluations/send-link
+router.post('/send-link', auth_1.authenticateJWT, (0, auth_1.requireRole)(['ADMIN', 'MANAGEMENT']), async (req, res) => {
+    try {
+        const { employeeId, contractId, evaluatorName, evaluatorPosition, evaluatorEmail, evaluatorPhone, sendEmailNow, frontendBaseUrl, } = req.body;
+        if (!employeeId) {
+            return res.status(400).json({ error: 'Karyawan wajib dipilih.' });
+        }
+        if (!evaluatorName) {
+            return res.status(400).json({ error: 'Nama atasan penilai wajib diisi.' });
+        }
+        const employee = await prisma_1.default.employee.findUnique({
+            where: { id: employeeId },
+            include: {
+                contracts: {
+                    orderBy: { sequence: 'desc' },
+                    take: 1,
+                },
+            },
+        });
+        if (!employee) {
+            return res.status(404).json({ error: 'Data karyawan tidak ditemukan.' });
+        }
+        const activeContract = contractId
+            ? await prisma_1.default.contract.findUnique({ where: { id: contractId } })
+            : employee.contracts[0];
+        // Check if there is an existing evaluation for this contract/employee
+        let evaluation = await prisma_1.default.contractEvaluation.findFirst({
+            where: {
+                OR: [
+                    ...(activeContract ? [{ contractId: activeContract.id }] : []),
+                    { employeeId: employee.id },
+                ],
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+        const token = (0, evaluationNotification_1.generateEvaluationToken)();
+        const tokenExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days
+        const romanMonths = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+        const now = new Date();
+        const generatedDocNo = `${Math.floor(Math.random() * 900 + 100)}/BDP-HRGA-SITE/${romanMonths[now.getMonth()]}/${now.getFullYear()}`;
+        if (evaluation && evaluation.status !== 'COMPLETED') {
+            evaluation = await prisma_1.default.contractEvaluation.update({
+                where: { id: evaluation.id },
+                data: {
+                    evaluatorName,
+                    evaluatorPosition: evaluatorPosition || null,
+                    evaluatorEmail: evaluatorEmail || null,
+                    evaluatorPhone: evaluatorPhone || null,
+                    accessToken: token,
+                    tokenExpiresAt,
+                    status: 'WAITING_EVALUATION',
+                },
+                include: { employee: true, contract: true },
+            });
+        }
+        else if (!evaluation) {
+            evaluation = await prisma_1.default.contractEvaluation.create({
+                data: {
+                    documentNumber: generatedDocNo,
+                    employeeId: employee.id,
+                    contractId: activeContract?.id || null,
+                    periodEnd: activeContract?.endDate || null,
+                    employeeLevel: employee.level || 'Non-Staff',
+                    scoresJson: '{}',
+                    statementsJson: '{}',
+                    totalScore: 0,
+                    averageScore: 0,
+                    ratingGrade: '-',
+                    recommendationType: 'PENDING',
+                    recommendationDuration: null,
+                    evaluatorName,
+                    evaluatorPosition: evaluatorPosition || null,
+                    evaluatorEmail: evaluatorEmail || null,
+                    evaluatorPhone: evaluatorPhone || null,
+                    accessToken: token,
+                    tokenExpiresAt,
+                    status: 'WAITING_EVALUATION',
+                    createdById: req.user?.id || null,
+                },
+                include: { employee: true, contract: true },
+            });
+        }
+        else {
+            evaluation = await prisma_1.default.contractEvaluation.update({
+                where: { id: evaluation.id },
+                data: {
+                    accessToken: token,
+                    tokenExpiresAt,
+                    evaluatorName,
+                    evaluatorPosition: evaluatorPosition || evaluation.evaluatorPosition,
+                    evaluatorEmail: evaluatorEmail || evaluation.evaluatorEmail,
+                    evaluatorPhone: evaluatorPhone || evaluation.evaluatorPhone,
+                },
+                include: { employee: true, contract: true },
+            });
+        }
+        const evaluationUrl = (0, evaluationNotification_1.getEvaluationUrl)(token, frontendBaseUrl);
+        const whatsappUrl = (0, evaluationNotification_1.buildEvaluationWhatsAppUrl)(evaluatorPhone, {
+            evaluatorName,
+            evaluatorPosition,
+            evaluatorEmail,
+            evaluatorPhone,
+            employeeName: employee.name,
+            employeeNik: employee.nik,
+            department: employee.department,
+            position: employee.position,
+            endDate: activeContract?.endDate || new Date(),
+            accessToken: token,
+            frontendBaseUrl,
+        });
+        let emailSent = false;
+        let emailError;
+        if (sendEmailNow && evaluatorEmail) {
+            const emailRes = await (0, evaluationNotification_1.sendEvaluationInviteEmail)({
+                evaluatorName,
+                evaluatorPosition,
+                evaluatorEmail,
+                evaluatorPhone,
+                employeeName: employee.name,
+                employeeNik: employee.nik,
+                department: employee.department,
+                position: employee.position,
+                endDate: activeContract?.endDate || new Date(),
+                accessToken: token,
+                frontendBaseUrl,
+            });
+            emailSent = emailRes.ok;
+            if (!emailRes.ok)
+                emailError = emailRes.error;
+        }
+        await (0, auditLogger_1.logAudit)(req.user?.id, 'SEND_EVALUATION_LINK', 'CONTRACT_EVALUATION', `Sent evaluation link for ${employee.name} to ${evaluatorName} (${evaluatorEmail || evaluatorPhone || 'link'})`, req.ip || '');
+        return res.json({
+            message: 'Link formulir evaluasi berhasil dibuat.',
+            evaluation,
+            evaluationUrl,
+            whatsappUrl,
+            emailSent,
+            emailError,
+        });
+    }
+    catch (error) {
+        console.error('Error sending evaluation link:', error);
+        return res.status(500).json({ error: 'Gagal membuat dan mengirimkan tautan evaluasi.' });
+    }
+});
+// GET /api/evaluations/public/:token
+router.get('/public/:token', async (req, res) => {
+    try {
+        const token = String(req.params.token).trim();
+        if (!token) {
+            return res.status(400).json({ error: 'Token tidak valid.' });
+        }
+        const evaluation = await prisma_1.default.contractEvaluation.findUnique({
+            where: { accessToken: token },
+            include: {
+                employee: {
+                    select: {
+                        id: true,
+                        nik: true,
+                        name: true,
+                        department: true,
+                        position: true,
+                        level: true,
+                        joinDate: true,
+                    },
+                },
+                contract: {
+                    select: {
+                        id: true,
+                        contractNumber: true,
+                        sequence: true,
+                        startDate: true,
+                        endDate: true,
+                        contractType: true,
+                    },
+                },
+            },
+        });
+        if (!evaluation) {
+            return res.status(404).json({ error: 'Formulir evaluasi tidak ditemukan atau tautan sudah tidak berlaku.' });
+        }
+        if (evaluation.tokenExpiresAt && new Date() > evaluation.tokenExpiresAt) {
+            return res.status(410).json({
+                error: 'Masa berlaku tautan evaluasi ini telah kedaluwarsa. Silakan hubungi tim HRD untuk meminta tautan baru.',
+            });
+        }
+        return res.json({
+            evaluation,
+            isCompleted: evaluation.status === 'COMPLETED',
+        });
+    }
+    catch (error) {
+        console.error('Error loading public evaluation:', error);
+        return res.status(500).json({ error: 'Gagal memuat formulir evaluasi.' });
+    }
+});
+// POST /api/evaluations/public/:token/submit
+router.post('/public/:token/submit', async (req, res) => {
+    try {
+        const token = String(req.params.token).trim();
+        const { scores, statements, evaluatorName, evaluatorPosition, notes, } = req.body;
+        const evaluation = await prisma_1.default.contractEvaluation.findUnique({
+            where: { accessToken: token },
+            include: { employee: true, contract: true },
+        });
+        if (!evaluation) {
+            return res.status(404).json({ error: 'Formulir evaluasi tidak ditemukan.' });
+        }
+        if (evaluation.tokenExpiresAt && new Date() > evaluation.tokenExpiresAt) {
+            return res.status(410).json({ error: 'Tautan evaluasi telah kedaluwarsa.' });
+        }
+        const scoresObj = (typeof scores === 'object' && scores !== null) ? scores : {};
+        const statementsObj = (typeof statements === 'object' && statements !== null) ? statements : {};
+        const calc = calculateEvaluationScores(scoresObj);
+        const updated = await prisma_1.default.contractEvaluation.update({
+            where: { id: evaluation.id },
+            data: {
+                scoresJson: JSON.stringify(scoresObj),
+                statementsJson: JSON.stringify(statementsObj),
+                totalScore: calc.totalScore,
+                averageScore: calc.averageScore,
+                ratingGrade: calc.ratingGrade,
+                recommendationType: calc.recommendationType,
+                recommendationDuration: calc.recommendationDuration,
+                evaluatorName: evaluatorName || evaluation.evaluatorName,
+                evaluatorPosition: evaluatorPosition || evaluation.evaluatorPosition,
+                notes: notes || evaluation.notes,
+                status: 'COMPLETED',
+                submittedDate: new Date(),
+                evaluationDate: new Date(),
+            },
+            include: {
+                employee: true,
+                contract: true,
+            },
+        });
+        await (0, auditLogger_1.logAudit)(null, 'EVALUATION_SUBMITTED_BY_SUPERVISOR', 'CONTRACT_EVALUATION', `Evaluation submitted online for ${evaluation.employee.name} by ${updated.evaluatorName || 'Supervisor'} (Score: ${calc.averageScore}, Rec: ${calc.recommendationDuration} Bln)`, req.ip || '');
+        return res.json({
+            message: 'Penilaian kinerja berhasil disimpan ke sistem HRIS.',
+            evaluation: updated,
+        });
+    }
+    catch (error) {
+        console.error('Error submitting public evaluation:', error);
+        return res.status(500).json({ error: 'Gagal mengirimkan penilaian kinerja.' });
     }
 });
 exports.default = router;

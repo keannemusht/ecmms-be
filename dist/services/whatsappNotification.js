@@ -29,9 +29,9 @@ function buildWhatsAppMessage(params) {
     return lines.join('\n');
 }
 function buildWhatsAppLink(phone, message) {
-    const cleanPhone = normalizePhone(phone);
+    const cleanPhone = normalizePhone(phone || '');
     if (!cleanPhone) {
-        return '';
+        return `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
     }
     return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
 }

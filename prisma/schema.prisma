@@ -225,6 +225,10 @@ model ContractEvaluation {
 
   evaluatorName      String?
   evaluatorPosition  String?
+  evaluatorEmail     String?
+  evaluatorPhone     String?
+  accessToken        String?   @unique
+  tokenExpiresAt     DateTime?
   knownByName        String?
   knownByPosition    String?
   checkedByName      String?

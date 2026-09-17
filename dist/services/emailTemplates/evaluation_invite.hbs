@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Permintaan Penilaian Evaluasi Kontrak - PT Batara Dharma Persada</title>
+</head>
+<body style="margin:0; padding:0; background-color:#F6F5F2; font-family:Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#151B26; -webkit-font-smoothing:antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F6F5F2; padding:30px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:580px; background-color:#FFFFFF; border-radius:10px; overflow:hidden; border:1px solid #DCD9D1; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#FFFFFF; padding:22px 28px; border-bottom:3px solid #9C6B2E;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  {{#if logoUrl}}
+                  <td valign="middle" style="padding-right:16px; width:130px;">
+                    <img src="{{logoUrl}}" alt="Logo" width="130" style="display:block; width:130px; max-width:130px; height:auto; border:0;" />
+                  </td>
+                  {{/if}}
+                  <td valign="middle" style="text-align:left;">
+                    <span style="font-size:15px; font-weight:700; color:#9C6B2E; letter-spacing:0.5px; display:block;">PT BATARA DHARMA PERSADA</span>
+                    <span style="font-size:11px; color:#4B5563; margin-top:2px; display:block;">Sistem Monitoring & Evaluasi Kontrak PKWT</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding:28px 32px 20px;">
+              <p style="margin:0 0 4px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#9C6B2E;">Formulir Evaluasi Kinerja Karyawan</p>
+              <h1 style="margin:0 0 16px; font-size:19px; font-weight:700; color:#151B26;">Permintaan Penilaian Evaluasi Kontrak</h1>
+              
+              <p style="margin:0 0 16px; font-size:13px; line-height:1.6; color:#374151;">
+                Yth. Bpk/Ibu <strong>{{evaluatorName}}</strong> ({{evaluatorPosition}}),
+              </p>
+              <p style="margin:0 0 20px; font-size:13px; line-height:1.6; color:#374151;">
+                Sehubungan dengan berakhirnya masa kerja karyawan berikut, mohon kesediaannya untuk melakukan penilaian kinerja melalui form evaluasi digital resmi:
+              </p>
+
+              <!-- Employee Details Table -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; margin-bottom:24px; border-radius:6px; overflow:hidden; border:1px solid #DCD9D1;">
+                <tr>
+                  <td style="padding:9px 12px; font-size:11px; font-weight:600; color:#4B5563; background-color:#ECEAE4; border-bottom:1px solid #DCD9D1; width:38%;">Nama Karyawan</td>
+                  <td style="padding:9px 12px; font-size:12px; font-weight:700; color:#151B26; border-bottom:1px solid #DCD9D1;">{{employeeName}}</td>
+                </tr>
+                <tr>
+                  <td style="padding:9px 12px; font-size:11px; font-weight:600; color:#4B5563; background-color:#ECEAE4; border-bottom:1px solid #DCD9D1;">NIK</td>
+                  <td style="padding:9px 12px; font-size:12px; font-weight:600; color:#151B26; border-bottom:1px solid #DCD9D1;">{{employeeNik}}</td>
+                </tr>
+                <tr>
+                  <td style="padding:9px 12px; font-size:11px; font-weight:600; color:#4B5563; background-color:#ECEAE4; border-bottom:1px solid #DCD9D1;">Departemen / Posisi</td>
+                  <td style="padding:9px 12px; font-size:12px; font-weight:600; color:#151B26; border-bottom:1px solid #DCD9D1;">{{department}} &bull; {{position}}</td>
+                </tr>
+                <tr>
+                  <td style="padding:9px 12px; font-size:11px; font-weight:600; color:#4B5563; background-color:#ECEAE4; width:38%;">Tanggal Akhir Kontrak</td>
+                  <td style="padding:9px 12px; font-size:12px; font-weight:700; color:#B91C1C;">{{endDateFormatted}}</td>
+                </tr>
+              </table>
+
+              <!-- CTA Button -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+                <tr>
+                  <td align="center">
+                    <a href="{{evaluationUrl}}" target="_blank" style="display:inline-block; background-color:#9C6B2E; color:#FFFFFF; text-decoration:none; padding:13px 32px; border-radius:6px; font-size:14px; font-weight:700; letter-spacing:0.3px; box-shadow:0 2px 6px rgba(156,107,46,0.35);">
+                      Buka & Isi Form Penilaian Sekarang &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <div style="background-color:#F9F8F6; border:1px dashed #DCD9D1; border-radius:6px; padding:14px 16px; margin-bottom:16px;">
+                <p style="margin:0 0 6px; font-size:11px; font-weight:700; color:#151B26;">📌 Petunjuk Singkat:</p>
+                <ul style="margin:0; padding-left:18px; font-size:11px; line-height:1.6; color:#4B5563;">
+                  <li>Pengisian form sangat cepat dan dapat diakses langsung lewat HP atau laptop (tanpa perlu login).</li>
+                  <li>Setelah disimpan, Anda dapat <strong>langsung mencetak dokumen fisik resmi 1 lembar A4</strong> untuk ditandatangani basah oleh Anda, Manager, hingga Direktur.</li>
+                  <li>Batas akhir pengisian adalah sebelum <strong>H-21</strong> berakhirnya kontrak kerja.</li>
+                </ul>
+              </div>
+
+              <p style="margin:0; font-size:11px; color:#6B7280; line-height:1.5;">
+                Jika tombol di atas tidak berfungsi, Anda dapat menyalin tautan berikut ke browser Anda:<br />
+                <a href="{{evaluationUrl}}" style="color:#9C6B2E; word-break:break-all;">{{evaluationUrl}}</a>
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#ECEAE4; padding:16px 28px; text-align:center; border-top:1px solid #DCD9D1;">
+              <p style="margin:0; font-size:11px; color:#4B5563;">
+                Pemberitahuan resmi dikirim oleh HRD PT Batara Dharma Persada melalui sistem ECMMS.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
