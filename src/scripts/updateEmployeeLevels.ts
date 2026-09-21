@@ -5,6 +5,14 @@ import { determineEmployeeLevel } from '../lib/employeeLevel';
 async function main() {
   console.log('[Update Employee Levels] Starting position-based level synchronization...');
 
+  // 1. Convert any explicit 'Non-Staff' to 'Worker' directly
+  const nonStaffRes = await prisma.employee.updateMany({
+    where: { level: 'Non-Staff' },
+    data: { level: 'Worker' },
+  });
+  console.log(`Converted ${nonStaffRes.count} employees from 'Non-Staff' to 'Worker'.`);
+
+  // 2. Process all unique positions
   const employees = await prisma.employee.findMany({
     select: {
       position: true,
@@ -35,7 +43,14 @@ async function main() {
     }
   }
 
-  console.log(`\nTotal employees updated: ${totalUpdated}`);
+  // 3. Update ContractEvaluation records with 'Non-Staff'
+  const evRes = await prisma.contractEvaluation.updateMany({
+    where: { employeeLevel: 'Non-Staff' },
+    data: { employeeLevel: 'Worker' },
+  });
+  console.log(`Updated ${evRes.count} ContractEvaluation records from 'Non-Staff' to 'Worker'.`);
+
+  console.log(`\nTotal employee level updates executed: ${totalUpdated}`);
 
   // Summary counts
   const summary = await prisma.employee.groupBy({

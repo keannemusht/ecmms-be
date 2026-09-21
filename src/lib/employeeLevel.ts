@@ -1,4 +1,6 @@
-export function determineEmployeeLevel(position: string = ''): 'Director' | 'Manager' | 'Staff' | 'Non-Staff' {
+export type EmployeeLevel = 'Director' | 'Manager' | 'Superintendent' | 'Supervisor' | 'Junior Supervisor' | 'Staff' | 'Worker';
+
+export function determineEmployeeLevel(position: string = ''): 'Director' | 'Manager' | 'Superintendent' | 'Supervisor' | 'Junior Supervisor' | 'Worker' {
   const pos = (position || '').trim().toLowerCase();
 
   // 1. Director
@@ -24,7 +26,30 @@ export function determineEmployeeLevel(position: string = ''): 'Director' | 'Man
     return 'Manager';
   }
 
-  // 3. Non-Staff (Driver, Mechanic, Operator, Helper, Field support, etc.)
+  // 3. Superintendent (NEW)
+  if (
+    pos.includes('superintendent') ||
+    pos.includes('supt') ||
+    pos.startsWith('si ') ||
+    pos.includes(' si ') ||
+    pos.endsWith(' si')
+  ) {
+    return 'Superintendent';
+  }
+
+  // 4. Supervisor (SPV)
+  if (
+    pos.includes('supervisor') ||
+    pos.includes('spv') ||
+    pos.includes('pengawas')
+  ) {
+    if (pos.includes('junior') || pos.includes('jr')) {
+      return 'Junior Supervisor';
+    }
+    return 'Supervisor';
+  }
+
+  // 5. Worker (Replaces Non-Staff: Driver, Mechanic, Operator, Helper, Field support, etc.)
   if (
     pos.includes('driver') ||
     pos.includes('sopir') ||
@@ -44,11 +69,14 @@ export function determineEmployeeLevel(position: string = ''): 'Director' | 'Man
     pos.includes('security') ||
     pos.includes('satpam') ||
     pos.includes('patrol') ||
-    pos.includes('kurir')
+    pos.includes('kurir') ||
+    pos.includes('worker') ||
+    pos.includes('buruh')
   ) {
-    return 'Non-Staff';
+    return 'Worker';
   }
 
-  // 4. Staff (SPV, Superintendent, Admin, Officer, Dokter, Magang, etc.)
-  return 'Staff';
+  // 6. Junior Supervisor (For Admin, Officer, Analyst, Magang, Dokter, etc.)
+  return 'Junior Supervisor';
 }
+
