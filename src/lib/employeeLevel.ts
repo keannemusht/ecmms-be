@@ -71,12 +71,27 @@ export function determineEmployeeLevel(position: string = ''): 'Director' | 'Man
     pos.includes('patrol') ||
     pos.includes('kurir') ||
     pos.includes('worker') ||
-    pos.includes('buruh')
+    pos.includes('buruh') ||
+    pos.includes('admin') ||
+    pos.includes('administrasi')
   ) {
     return 'Worker';
   }
 
-  // 6. Junior Supervisor (For Admin, Officer, Analyst, Magang, Dokter, etc.)
+  // 6. Junior Supervisor (For Officer, Analyst, Magang, Dokter, etc.)
   return 'Junior Supervisor';
+}
+
+export function formatEmployeeLevel(level?: string | null): string {
+  if (!level) return '';
+  const trimmed = level.trim();
+  const lower = trimmed.toLowerCase();
+  if (lower === 'superintendent' || lower === 'suptend') {
+    return 'Suptend';
+  }
+  if (lower === 'junior supervisor' || lower === 'jr supervisor' || lower === 'jr. supervisor') {
+    return 'Jr Supervisor';
+  }
+  return trimmed;
 }
 

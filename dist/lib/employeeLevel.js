@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.determineEmployeeLevel = determineEmployeeLevel;
+exports.formatEmployeeLevel = formatEmployeeLevel;
 function determineEmployeeLevel(position = '') {
     const pos = (position || '').trim().toLowerCase();
     // 1. Director
@@ -58,9 +59,24 @@ function determineEmployeeLevel(position = '') {
         pos.includes('patrol') ||
         pos.includes('kurir') ||
         pos.includes('worker') ||
-        pos.includes('buruh')) {
+        pos.includes('buruh') ||
+        pos.includes('admin') ||
+        pos.includes('administrasi')) {
         return 'Worker';
     }
-    // 6. Junior Supervisor (For Admin, Officer, Analyst, Magang, Dokter, etc.)
+    // 6. Junior Supervisor (For Officer, Analyst, Magang, Dokter, etc.)
     return 'Junior Supervisor';
+}
+function formatEmployeeLevel(level) {
+    if (!level)
+        return '';
+    const trimmed = level.trim();
+    const lower = trimmed.toLowerCase();
+    if (lower === 'superintendent' || lower === 'suptend') {
+        return 'Suptend';
+    }
+    if (lower === 'junior supervisor' || lower === 'jr supervisor' || lower === 'jr. supervisor') {
+        return 'Jr Supervisor';
+    }
+    return trimmed;
 }
