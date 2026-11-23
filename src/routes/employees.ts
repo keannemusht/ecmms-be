@@ -624,12 +624,31 @@ router.post('/bulk-import', authenticateJWT, requireRole(['ADMIN', 'MANAGEMENT']
       }
     }
 
+    // Check for potential duplicate names with different NIK in this batch
+    const nameToNiks = new Map<string, string[]>();
+    for (const [nik, data] of empMap.entries()) {
+      const norm = data.name.toLowerCase().replace(/[^\w\s]/gi, '').replace(/\s+/g, ' ').trim();
+      if (!nameToNiks.has(norm)) nameToNiks.set(norm, []);
+      nameToNiks.get(norm)!.push(nik);
+    }
+    let duplicateWarning = '';
+    let duplicateCount = 0;
+    for (const [_, niks] of nameToNiks.entries()) {
+      if (niks.length > 1) {
+        duplicateCount++;
+      }
+    }
+    if (duplicateCount > 0) {
+      duplicateWarning = ` Terdeteksi ${duplicateCount} nama dengan NIK berbeda (kemungkinan typo NIK). Buka menu "Rekonsiliasi Data" untuk menggabungkannya.`;
+    }
+
     await logAudit(req.user?.id, 'BULK_IMPORT', 'EMPLOYEE', `Imported ${successCount} employees (${failedCount} failed)`, req.ip || '');
 
     return res.json({
-      message: `Proses import selesai. Berhasil: ${successCount} karyawan, Gagal: ${failedCount}`,
+      message: `Proses import selesai. Berhasil: ${successCount} karyawan, Gagal: ${failedCount}.${duplicateWarning}`,
       successCount,
       failedCount,
+      duplicateCount,
       errors,
     });
   } catch (error) {
